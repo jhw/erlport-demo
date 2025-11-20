@@ -25,27 +25,12 @@ start_link(LeagueCode) ->
 %%====================================================================
 
 init([LeagueCode]) ->
-    % Load league data
-    PrivDir = code:priv_dir(erlport_demo),
-
-    % Load leagues
-    LeaguesFile = filename:join([PrivDir, "data", "leagues", "leagues.json"]),
-    {ok, LeaguesJson} = file:read_file(LeaguesFile),
-    Leagues = thoas:decode(LeaguesJson),
-
-    % Find this league
-    LeagueData = lists:foldl(fun(L, Acc) ->
-        case maps:get(<<"code">>, L) of
-            LeagueCode -> L;
-            _ -> Acc
-        end
-    end, undefined, Leagues),
-
-    case LeagueData of
-        undefined ->
+    % Get league data from config service
+    case config_service:get_league_data(LeagueCode) of
+        {error, league_not_found} ->
             error_logger:error_msg("League ~p not found~n", [LeagueCode]),
             {stop, {error, league_not_found}};
-        _ ->
+        {ok, LeagueData, _Teams} ->
             % Schedule scrapers using centralized scheduler
             % BBC scraper
             case maps:get(<<"bbcName">>, LeagueData, undefined) of

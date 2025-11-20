@@ -12,7 +12,9 @@
     interval_ms :: integer(),
     mfa :: {module(), atom(), list()},
     timer_ref :: reference() | undefined,
-    in_progress :: boolean()
+    in_progress :: boolean(),
+    worker_pid :: pid() | undefined,
+    worker_monitor :: reference() | undefined
 }).
 
 -record(state, {
@@ -66,7 +68,9 @@ handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) 
         interval_ms = IntervalMs,
         mfa = MFA,
         timer_ref = TimerRef,
-        in_progress = false
+        in_progress = false,
+        worker_pid = undefined,
+        worker_monitor = undefined
     },
 
     error_logger:info_msg("Scheduled task ~p to run every ~p ms~n", [Id, IntervalMs]),
@@ -107,44 +111,96 @@ handle_info({execute_task, Id}, State) ->
                     UpdatedTask = Task#task{timer_ref = TimerRef},
                     {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}};
                 false ->
-                    % Mark task as in progress
-                    UpdatedTask = Task#task{in_progress = true},
-                    NewState = State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)},
-
-                    % Execute task in separate process
+                    % Execute task in separate monitored process
                     {M, F, A} = Task#task.mfa,
                     Self = self(),
-                    spawn(fun() ->
+                    WorkerPid = spawn(fun() ->
                         try
-                            apply(M, F, A)
+                            apply(M, F, A),
+                            Self ! {task_complete, Id, self()}
                         catch
                             Error:Reason:Stacktrace ->
                                 error_logger:error_msg(
                                     "Task ~p failed: ~p:~p~nStacktrace: ~p~n",
                                     [Id, Error, Reason, Stacktrace]
-                                )
-                        after
-                            % Notify scheduler that task is complete
-                            Self ! {task_complete, Id}
+                                ),
+                                Self ! {task_complete, Id, self()}
                         end
                     end),
+
+                    % Monitor the worker process
+                    MonitorRef = erlang:monitor(process, WorkerPid),
+
+                    % Mark task as in progress with worker info
+                    UpdatedTask = Task#task{
+                        in_progress = true,
+                        worker_pid = WorkerPid,
+                        worker_monitor = MonitorRef
+                    },
+                    NewState = State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)},
 
                     {noreply, NewState}
             end
     end;
 
-handle_info({task_complete, Id}, State) ->
+handle_info({task_complete, Id, _WorkerPid}, State) ->
     case maps:get(Id, State#state.tasks, undefined) of
         undefined ->
             {noreply, State};
         Task ->
+            % Demonitor the worker
+            case Task#task.worker_monitor of
+                undefined -> ok;
+                MonitorRef -> erlang:demonitor(MonitorRef, [flush])
+            end,
+
             % Mark task as not in progress and schedule next execution
             TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
             UpdatedTask = Task#task{
                 in_progress = false,
-                timer_ref = TimerRef
+                timer_ref = TimerRef,
+                worker_pid = undefined,
+                worker_monitor = undefined
             },
             {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}}
+    end;
+
+handle_info({'DOWN', MonitorRef, process, _Pid, Reason}, State) ->
+    % A task worker died - find which task and reschedule
+    TaskEntry = maps:fold(
+        fun(Id, Task, Acc) ->
+            case Task#task.worker_monitor of
+                MonitorRef -> {found, Id, Task};
+                _ -> Acc
+            end
+        end,
+        not_found,
+        State#state.tasks
+    ),
+
+    case TaskEntry of
+        {found, Id, Task} ->
+            case Reason of
+                normal ->
+                    ok;
+                _ ->
+                    error_logger:warning_msg(
+                        "Task ~p worker died abnormally: ~p~n",
+                        [Id, Reason]
+                    )
+            end,
+
+            % Mark task as not in progress and schedule next execution
+            TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
+            UpdatedTask = Task#task{
+                in_progress = false,
+                timer_ref = TimerRef,
+                worker_pid = undefined,
+                worker_monitor = undefined
+            },
+            {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}};
+        not_found ->
+            {noreply, State}
     end;
 
 handle_info(_Info, State) ->

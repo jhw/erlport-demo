@@ -20,12 +20,19 @@ An Erlang application demonstrating ErlPort integration for scraping football re
 └─┬────────────────────────────────────────────┘
   │
   ├─► [1] infrastructure_sup (one_for_one)
+  │        ├─► config_service (static data)
   │        ├─► event_store (ETS)
-  │        ├─► scheduler (task manager)
-  │        └─► python_pools_sup (one_for_one)
-  │             ├─► bbc_pool (2 workers)
-  │             ├─► fishy_pool (2 workers)
-  │             └─► matcher_pool (2 workers)
+  │        ├─► scheduler (task manager, monitors workers)
+  │        └─► python_pools_sup (rest_for_one)
+  │             ├─► bbc_pool_worker_sup (simple_one_for_one)
+  │             │   └─► [2 python_workers]
+  │             ├─► bbc_pool (pool manager)
+  │             ├─► fishy_pool_worker_sup (simple_one_for_one)
+  │             │   └─► [2 python_workers]
+  │             ├─► fishy_pool (pool manager)
+  │             ├─► matcher_pool_worker_sup (simple_one_for_one)
+  │             │   └─► [2 python_workers]
+  │             └─► matcher_pool (pool manager)
   │
   └─► [2] leagues_sup (one_for_one)
            ├─► league_worker_sup (ENG1)
@@ -48,13 +55,18 @@ Scheduler executes: bbc_scraper:scrape/1
 
 **OTP Best Practices:**
 - **rest_for_one at top level**: Proper dependency ordering with cascading restarts
-- **All infrastructure together**: Event store, scheduler, and Python pools under one supervisor
-- **infrastructure_sup**: Contains ALL foundational services (storage, scheduling, Python)
-- **python_pools_sup**: Nested under infrastructure_sup (part of infrastructure)
+- **All infrastructure together**: Config, event store, scheduler, and Python pools under one supervisor
+- **infrastructure_sup**: Contains ALL foundational services (config, storage, scheduling, Python)
+- **config_service**: Centralized static data loading (no file I/O in init/1 elsewhere)
+- **python_pools_sup**: Proper supervision hierarchy with simple_one_for_one for workers
+- **python_worker**: Individual workers managed by supervisors, not manually restarted
+- **Monitored task execution**: Scheduler monitors all task processes, no orphans
+- **Message passing**: Python results sent via messages, no callback complexity
 - **Per-league supervision**: Each league isolated with its own supervisor tree
 - **Simple dependency**: infrastructure → leagues (2 levels, clean and clear)
 - **Clean shutdown**: Supervisors have infinity timeout, workers have 5s
 - **Separation of concerns**: League workers register, scheduler executes, scrapers do work
+- **No blocking**: Event store updates via cast, timeouts on all Python calls
 
 ## Requirements
 
@@ -132,13 +144,16 @@ erlport-demo/
 │           ├── erlport_demo_app.erl      # Application entry point
 │           ├── erlport_demo_sup.erl      # Main supervisor (rest_for_one)
 │           ├── infrastructure_sup.erl    # Infrastructure supervisor
+│           ├── config_service.erl        # Centralized config/data service
 │           ├── event_store.erl           # ETS-based event storage
-│           ├── scheduler.erl             # Centralized task scheduler
+│           ├── scheduler.erl             # Centralized task scheduler (monitors workers)
 │           ├── bbc_scraper.erl           # BBC scraping logic
 │           ├── fishy_scraper.erl         # Fishy scraping logic
 │           ├── scraper_utils.erl         # Shared scraper utilities
 │           ├── python_pools_sup.erl      # Python pools supervisor
-│           ├── python_pool.erl           # Python process pool worker
+│           ├── python_pool.erl           # Python pool manager
+│           ├── python_pool_worker_sup.erl # Worker supervisor (simple_one_for_one)
+│           ├── python_worker.erl         # Individual Python worker
 │           ├── leagues_sup.erl           # Leagues supervisor
 │           ├── league_worker_sup.erl     # Per-league supervisor
 │           ├── league_worker.erl         # Per-league worker (registers tasks)
@@ -172,12 +187,18 @@ erlport-demo/
 
 ## Python Process Pools
 
-The application maintains 3 separate Python process pools:
+The application maintains 3 separate Python process pools with proper OTP supervision:
 - **bbc_pool**: 2 workers for BBC HTML parsing
 - **fishy_pool**: 2 workers for Fishy HTML parsing
 - **matcher_pool**: 2 workers for name matching
 
-Requests are queued when all workers are busy, ensuring CPU usage stays controlled.
+Each pool has:
+- A `simple_one_for_one` supervisor managing individual `python_worker` processes
+- A pool manager (`python_pool`) that coordinates work distribution
+- Automatic worker restart on failure (supervised by OTP)
+- Request queuing when all workers are busy
+- Message-passing interface (results sent as `{python_result, WorkerPid, Result}`)
+- Worker monitoring to detect failures and update availability
 
 ## Event Storage
 
@@ -206,7 +227,7 @@ This handles variations like:
 
 ## Scheduler
 
-The centralized `scheduler.erl` manages all recurring tasks. League workers register their scraping tasks on startup.
+The centralized `scheduler.erl` manages all recurring tasks with proper process supervision. League workers register their scraping tasks on startup.
 
 To change interval, modify the `scheduler:schedule_task/4` calls in `league_worker.erl`:
 ```erlang
@@ -221,6 +242,8 @@ scheduler:schedule_task(
 
 The scheduler provides:
 - **Visibility timeout**: Prevents overlapping executions
+- **Process monitoring**: All task workers are monitored, no orphaned processes
+- **Failure handling**: Tasks automatically rescheduled if worker dies
 - **Automatic rescheduling**: Tasks repeat at specified intervals
 - **Centralized management**: All tasks in one place
 - **Clean shutdown**: Tasks cancelled when workers terminate

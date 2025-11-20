@@ -127,6 +127,59 @@ handle_call(get_all_events, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
+handle_cast({store_event, League, Name, Date, Source, Score}, State) ->
+    % Handle store_event as cast for better performance
+    Key = {League, Name, Date},
+    Timestamp = erlang:system_time(millisecond),
+
+    _Event = case ets:lookup(State#state.table, Key) of
+        [] ->
+            % Create new event
+            NewEvent = case Source of
+                bbc ->
+                    #event{
+                        key = Key,
+                        league = League,
+                        name = Name,
+                        date = Date,
+                        bbc_score = Score,
+                        fishy_score = undefined,
+                        created_at = Timestamp,
+                        updated_at = Timestamp
+                    };
+                fishy ->
+                    #event{
+                        key = Key,
+                        league = League,
+                        name = Name,
+                        date = Date,
+                        bbc_score = undefined,
+                        fishy_score = Score,
+                        created_at = Timestamp,
+                        updated_at = Timestamp
+                    }
+            end,
+            ets:insert(State#state.table, NewEvent),
+            NewEvent;
+        [ExistingEvent] ->
+            % Update existing event
+            UpdatedEvent = case Source of
+                bbc ->
+                    ExistingEvent#event{
+                        bbc_score = Score,
+                        updated_at = Timestamp
+                    };
+                fishy ->
+                    ExistingEvent#event{
+                        fishy_score = Score,
+                        updated_at = Timestamp
+                    }
+            end,
+            ets:insert(State#state.table, UpdatedEvent),
+            UpdatedEvent
+    end,
+    {noreply, State};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

@@ -26,6 +26,15 @@ init([]) ->
     },
 
     Children = [
+        % Config service - must start first (loads data for everyone)
+        #{
+            id => config_service,
+            start => {config_service, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [config_service]
+        },
         % Event store
         #{
             id => event_store,

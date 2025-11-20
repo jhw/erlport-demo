@@ -25,11 +25,8 @@ init([]) ->
         period => 10
     },
 
-    % Load league data and create a supervisor for each league
-    PrivDir = code:priv_dir(erlport_demo),
-    LeaguesFile = filename:join([PrivDir, "data", "leagues", "leagues.json"]),
-    {ok, LeaguesJson} = file:read_file(LeaguesFile),
-    Leagues = thoas:decode(LeaguesJson),
+    % Get league data from config service
+    {ok, Leagues} = config_service:get_all_leagues(),
 
     % Create child spec for each league
     Children = lists:map(fun(League) ->
