@@ -1,0 +1,6 @@
+-sname erlport_demo
+
+-setcookie erlport_demo_cookie
+
++K true
++A30

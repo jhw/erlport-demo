@@ -1,0 +1,20 @@
+[
+  {
+    "code": "ENG1",
+    "footballDataId": "E0",
+    "oddscheckerPath": "football/english/premier-league",
+    "bbcName": "premier-league",
+    "thefishyId": 1,
+    "rounds": 1,
+    "isActive": true
+  },
+  {
+    "code": "ENG2",
+    "footballDataId": "E1",
+    "oddscheckerPath": "football/english/championship",
+    "bbcName": "championship",
+    "thefishyId": 2,
+    "rounds": 1,
+    "isActive": true
+  }
+]
