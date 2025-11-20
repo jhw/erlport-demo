@@ -41,7 +41,7 @@ init([LeagueCode]) ->
                         BbcTaskId,
                         60000,  % 60 second interval
                         {bbc_scraper, scrape, [LeagueCode]},
-                        5000    % Start after 5 seconds
+                        1000    % Start after 1 second
                     )
             end,
 
@@ -54,7 +54,7 @@ init([LeagueCode]) ->
                         FishyTaskId,
                         60000,  % 60 second interval
                         {fishy_scraper, scrape, [LeagueCode]},
-                        5000    % Start after 5 seconds
+                        1000    % Start after 1 second
                     )
             end,
 
