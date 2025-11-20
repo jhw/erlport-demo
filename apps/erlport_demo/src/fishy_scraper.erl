@@ -11,7 +11,7 @@ scrape(LeagueCode) ->
     error_logger:info_msg("Starting Fishy scrape for ~p~n", [LeagueCode]),
 
     % Get league and team data from config service
-    case scraper_utils:load_league_data(LeagueCode) of
+    case config_service:get_league_data(LeagueCode) of
         {ok, LeagueData, Teams} ->
             case maps:get(<<"thefishyId">>, LeagueData, undefined) of
                 undefined ->

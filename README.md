@@ -137,7 +137,6 @@ erlport-demo/
 │           ├── scheduler.erl             # Centralized task scheduler (monitors workers)
 │           ├── bbc_scraper.erl           # BBC scraping logic
 │           ├── fishy_scraper.erl         # Fishy scraping logic
-│           ├── scraper_utils.erl         # Shared scraper utilities
 │           ├── python_pools_sup.erl      # Python pools supervisor
 │           ├── python_pool.erl           # Python pool (spawns & manages workers)
 │           ├── python_worker.erl         # Individual Python worker
