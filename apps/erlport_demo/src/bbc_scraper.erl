@@ -21,8 +21,8 @@ scrape(LeagueCode) ->
 
                     case http_client:fetch_url(Url) of
                         {ok, 200, Body} ->
-                            % Parse with Python using async helper
-                            case python_async:call_and_await(bbc_pool, {bbc_scraper, parse_bbc_html, [Body]}, 30000) of
+                            % Parse with Python
+                            case python_pool:call_and_await(bbc_pool, {bbc_scraper, parse_bbc_html, [Body]}, 30000) of
                                 {ok, ParsedResults} ->
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
@@ -66,8 +66,8 @@ match_and_store_result(Result, LeagueCode, TeamsData) ->
     Date = maps:get(<<"date">>, Result),
     Score = maps:get(<<"score">>, Result),
 
-    % Call matcher pool using async helper
-    case python_async:call_and_await(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, 10000) of
+    % Call matcher pool
+    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, 10000) of
         {ok, MatchedName} when MatchedName =/= none, MatchedName =/= undefined ->
             gen_server:cast(event_store, {store_event, LeagueCode, MatchedName, Date, bbc, Score}),
             error_logger:info_msg("Stored BBC event: ~p ~p ~p ~p~n", [LeagueCode, MatchedName, Date, Score]);

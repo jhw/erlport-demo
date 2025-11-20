@@ -140,7 +140,6 @@ erlport-demo/
 │           ├── python_pools_sup.erl      # Python pools supervisor
 │           ├── python_pool.erl           # Python pool (spawns & manages workers)
 │           ├── python_worker.erl         # Individual Python worker
-│           ├── python_async.erl          # Async Python call helper
 │           ├── leagues_sup.erl           # Leagues supervisor
 │           ├── league_worker.erl         # Per-league worker (registers tasks)
 │           ├── http_client.erl           # Gun-based HTTP client

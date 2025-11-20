@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3, call_python/3]).
+-export([start_link/3, call_python/3, call_and_await/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -26,6 +26,29 @@ start_link(PoolName, ScriptName, PoolSize) ->
 %% Call Python function asynchronously - result sent as {python_result, WorkerPid, Result}
 call_python(PoolName, {Module, Function, Args}, CallerPid) ->
     gen_server:cast(PoolName, {call_python, Module, Function, Args, CallerPid}).
+
+%% Call Python function and await result synchronously
+%% Returns {ok, Result} | {error, Reason}
+%%
+%% This is a convenience wrapper that:
+%% 1. Calls call_python/3
+%% 2. Receives {python_result, WorkerPid, Result}
+%% 3. Handles timeout
+%%
+%% Example:
+%%   case python_pool:call_and_await(bbc_pool, {bbc_scraper, parse, [Body]}, 30000) of
+%%       {ok, ParsedResults} -> ...;
+%%       {error, timeout} -> ...;
+%%       {error, Reason} -> ...
+%%   end
+%%
+call_and_await(PoolName, {Module, Function, Args}, Timeout) ->
+    call_python(PoolName, {Module, Function, Args}, self()),
+    receive
+        {python_result, _WorkerPid, Result} -> Result
+    after Timeout ->
+        {error, timeout}
+    end.
 
 %%====================================================================
 %% gen_server callbacks
