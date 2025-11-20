@@ -28,16 +28,16 @@ init([]) ->
     % Get league data from config service
     {ok, Leagues} = config_service:get_all_leagues(),
 
-    % Create child spec for each league
+    % Create child spec for each league - directly supervise league_workers
     Children = lists:map(fun(League) ->
         LeagueCode = maps:get(<<"code">>, League),
         #{
-            id => list_to_atom("league_sup_" ++ binary_to_list(LeagueCode)),
-            start => {league_worker_sup, start_link, [LeagueCode]},
+            id => list_to_atom("league_worker_" ++ binary_to_list(LeagueCode)),
+            start => {league_worker, start_link, [LeagueCode]},
             restart => permanent,
             shutdown => 5000,
-            type => supervisor,
-            modules => [league_worker_sup]
+            type => worker,
+            modules => [league_worker]
         }
     end, Leagues),
 

@@ -35,13 +35,8 @@ An Erlang application demonstrating ErlPort integration for scraping football re
   │             └─► matcher_pool (pool manager)
   │
   └─► [2] leagues_sup (one_for_one)
-           ├─► league_worker_sup (ENG1)
-           │   └─► league_worker (ENG1)
-           │       └─► registers tasks →
-           │
-           └─► league_worker_sup (ENG2)
-               └─► league_worker (ENG2)
-                   └─► registers tasks →
+           ├─► league_worker (ENG1) → registers tasks
+           └─► league_worker (ENG2) → registers tasks
 
 Scheduler executes: bbc_scraper:scrape/1
                     fishy_scraper:scrape/1
@@ -62,7 +57,7 @@ Scheduler executes: bbc_scraper:scrape/1
 - **python_worker**: Individual workers managed by supervisors, not manually restarted
 - **Monitored task execution**: Scheduler monitors all task processes, no orphans
 - **Message passing**: Python results sent via messages, no callback complexity
-- **Per-league supervision**: Each league isolated with its own supervisor tree
+- **Flat league supervision**: leagues_sup directly supervises league_workers (no unnecessary nesting)
 - **Simple dependency**: infrastructure → leagues (2 levels, clean and clear)
 - **Clean shutdown**: Supervisors have infinity timeout, workers have 5s
 - **Separation of concerns**: League workers register, scheduler executes, scrapers do work
@@ -155,7 +150,6 @@ erlport-demo/
 │           ├── python_pool_worker_sup.erl # Worker supervisor (simple_one_for_one)
 │           ├── python_worker.erl         # Individual Python worker
 │           ├── leagues_sup.erl           # Leagues supervisor
-│           ├── league_worker_sup.erl     # Per-league supervisor
 │           ├── league_worker.erl         # Per-league worker (registers tasks)
 │           ├── http_client.erl           # Gun-based HTTP client
 │           └── api_handler.erl           # Cowboy HTTP handler
