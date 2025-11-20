@@ -42,7 +42,7 @@ init([]) ->
         {ok, LeaguesJson} ->
             thoas:decode(LeaguesJson);
         {error, Reason} ->
-            error_logger:error_msg("Failed to load leagues.json: ~p~n", [Reason]),
+            logger:error("Failed to load leagues.json: ~p", [Reason]),
             []
     end,
 
@@ -55,12 +55,12 @@ init([]) ->
                 TeamsList = thoas:decode(TeamsJson),
                 maps:put(LeagueCode, TeamsList, Acc);
             {error, TeamsReason} ->
-                error_logger:warning_msg("Failed to load teams for ~p: ~p~n", [LeagueCode, TeamsReason]),
+                logger:warning("Failed to load teams for ~p: ~p", [LeagueCode, TeamsReason]),
                 Acc
         end
     end, #{}, Leagues),
 
-    error_logger:info_msg("Config service initialized with ~p leagues~n", [length(Leagues)]),
+    logger:info("Config service initialized with ~p leagues", [length(Leagues)]),
 
     {ok, #state{leagues = Leagues, teams = Teams}}.
 

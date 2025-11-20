@@ -19,8 +19,8 @@ start(_StartType, _StartArgs) ->
         #{env => #{dispatch => Dispatch}}
     ),
 
-    error_logger:info_msg("HTTP API started on port 8080~n"),
-    error_logger:info_msg("League workers started automatically~n"),
+    logger:info("HTTP API started on port 8080"),
+    logger:info("League workers started automatically"),
 
     {ok, Pid}.
 

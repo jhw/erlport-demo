@@ -28,7 +28,7 @@ init([LeagueCode]) ->
     % Get league data from config service
     case config_service:get_league_data(LeagueCode) of
         {error, league_not_found} ->
-            error_logger:error_msg("League ~p not found~n", [LeagueCode]),
+            logger:error("League ~p not found", [LeagueCode]),
             {stop, {error, league_not_found}};
         {ok, LeagueData, _Teams} ->
             % Schedule scrapers using centralized scheduler
@@ -58,7 +58,7 @@ init([LeagueCode]) ->
                     )
             end,
 
-            error_logger:info_msg("League worker started for ~p~n", [LeagueCode]),
+            logger:info("League worker started for ~p", [LeagueCode]),
 
             {ok, #state{
                 league_code = LeagueCode,

@@ -69,7 +69,7 @@ init([PoolName, ScriptName, PoolSize]) ->
 
     AvailableWorkers = queue:from_list(Workers),
 
-    error_logger:info_msg("Python pool ~p started with ~p workers~n",
+    logger:info("Python pool ~p started with ~p workers",
         [PoolName, PoolSize]),
 
     {ok, #state{

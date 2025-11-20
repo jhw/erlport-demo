@@ -53,7 +53,7 @@ get_all_events() ->
 init([]) ->
     TableName = events_table,
     Table = ets:new(TableName, [set, protected, {keypos, #event.key}]),
-    error_logger:info_msg("Event store initialized with table ~p~n", [TableName]),
+    logger:info("Event store initialized with table ~p", [TableName]),
     {ok, #state{table = Table}}.
 
 handle_call({store_event, League, Name, Date, Source, Score}, _From, State) ->
