@@ -26,7 +26,7 @@ call_python(WorkerPid, Module, Function, Args) ->
 %% gen_server callbacks
 %%====================================================================
 
-init([_ScriptName]) ->
+init([ScriptName]) ->
     process_flag(trap_exit, true),
 
     % Get the path to the priv/python directory
@@ -35,6 +35,9 @@ init([_ScriptName]) ->
 
     % Start Python instance
     {ok, PythonPid} = python:start([{python_path, PythonPath}]),
+
+    logger:debug("Python worker started for ~p (pid: ~p, python_pid: ~p)",
+        [ScriptName, self(), PythonPid]),
 
     {ok, #state{python_pid = PythonPid}}.
 
@@ -49,8 +52,8 @@ handle_cast({call_python, Module, Function, Args, CallerPid}, State) ->
             CallerPid ! {python_result, self(), {ok, Result}}
         catch
             Error:Reason:Stacktrace ->
-                error_logger:error_msg(
-                    "Python call failed: ~p:~p~nStacktrace: ~p~n",
+                logger:error(
+                    "Python call failed: ~p:~p~nStacktrace: ~p",
                     [Error, Reason, Stacktrace]
                 ),
                 CallerPid ! {python_result, self(), {error, {Error, Reason}}}
@@ -67,19 +70,20 @@ handle_info({'EXIT', _Pid, normal}, State) ->
 
 handle_info({'EXIT', Pid, Reason}, State) when Pid =:= State#state.python_pid ->
     % Python process died, we should die too and let supervisor restart us
-    error_logger:error_msg("Python process ~p died: ~p~n", [Pid, Reason]),
+    logger:error("Python process ~p died: ~p", [Pid, Reason]),
     {stop, {python_died, Reason}, State};
 
 handle_info({'EXIT', _Pid, Reason}, State) ->
     % A task process died
-    error_logger:warning_msg("Task process died: ~p~n", [Reason]),
+    logger:warning("Task process died: ~p", [Reason]),
     {noreply, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State) ->
+terminate(Reason, State) ->
     % Stop Python instance
+    logger:debug("Python worker ~p terminating: ~p", [self(), Reason]),
     catch python:stop(State#state.python_pid),
     ok.
 
