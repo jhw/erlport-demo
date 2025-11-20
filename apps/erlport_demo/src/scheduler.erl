@@ -45,7 +45,7 @@ cancel_task(Id) ->
 %%====================================================================
 
 init([]) ->
-    error_logger:info_msg("Scheduler started~n"),
+    logger:info("Scheduler started"),
     {ok, #state{tasks = #{}}}.
 
 handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) ->
@@ -73,7 +73,7 @@ handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) 
         worker_monitor = undefined
     },
 
-    error_logger:info_msg("Scheduled task ~p to run every ~p ms~n", [Id, IntervalMs]),
+    logger:info("Scheduled task ~p to run every ~p ms", [Id, IntervalMs]),
 
     {reply, ok, NewState#state{tasks = maps:put(Id, Task, NewState#state.tasks)}};
 
@@ -86,7 +86,7 @@ handle_call({cancel_task, Id}, _From, State) ->
                 undefined -> ok;
                 TimerRef -> erlang:cancel_timer(TimerRef)
             end,
-            error_logger:info_msg("Cancelled task ~p~n", [Id]),
+            logger:info("Cancelled task ~p", [Id]),
             {reply, ok, State#state{tasks = maps:remove(Id, State#state.tasks)}}
     end;
 
@@ -106,13 +106,14 @@ handle_info({execute_task, Id}, State) ->
             case Task#task.in_progress of
                 true ->
                     % Task still running, skip this execution and reschedule
-                    error_logger:warning_msg("Task ~p still in progress, skipping execution~n", [Id]),
+                    logger:warning("Task ~p still in progress, skipping execution", [Id]),
                     TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
                     UpdatedTask = Task#task{timer_ref = TimerRef},
                     {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}};
                 false ->
                     % Execute task in separate monitored process
                     {M, F, A} = Task#task.mfa,
+                    logger:info("Executing task ~p: ~p:~p", [Id, M, F]),
                     Self = self(),
                     WorkerPid = spawn(fun() ->
                         try
@@ -120,8 +121,8 @@ handle_info({execute_task, Id}, State) ->
                             Self ! {task_complete, Id, self()}
                         catch
                             Error:Reason:Stacktrace ->
-                                error_logger:error_msg(
-                                    "Task ~p failed: ~p:~p~nStacktrace: ~p~n",
+                                logger:error(
+                                    "Task ~p failed: ~p:~p~nStacktrace: ~p",
                                     [Id, Error, Reason, Stacktrace]
                                 ),
                                 Self ! {task_complete, Id, self()}
@@ -154,6 +155,8 @@ handle_info({task_complete, Id, _WorkerPid}, State) ->
                 MonitorRef -> erlang:demonitor(MonitorRef, [flush])
             end,
 
+            logger:info("Task ~p completed successfully", [Id]),
+
             % Mark task as not in progress and schedule next execution
             TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
             UpdatedTask = Task#task{
@@ -184,8 +187,8 @@ handle_info({'DOWN', MonitorRef, process, _Pid, Reason}, State) ->
                 normal ->
                     ok;
                 _ ->
-                    error_logger:warning_msg(
-                        "Task ~p worker died abnormally: ~p~n",
+                    logger:warning(
+                        "Task ~p worker died abnormally: ~p",
                         [Id, Reason]
                     )
             end,

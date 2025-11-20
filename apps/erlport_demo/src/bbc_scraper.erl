@@ -8,36 +8,39 @@
 %%====================================================================
 
 scrape(LeagueCode) ->
-    error_logger:info_msg("Starting BBC scrape for ~p~n", [LeagueCode]),
+    logger:info("BBC scraper: Starting scrape for ~p", [LeagueCode]),
 
     % Get league and team data from config service
     case config_service:get_league_data(LeagueCode) of
         {ok, LeagueData, Teams} ->
             case maps:get(<<"bbcName">>, LeagueData, undefined) of
                 undefined ->
-                    error_logger:warning_msg("No BBC name for league ~p~n", [LeagueCode]);
+                    logger:warning("BBC scraper: No BBC name for league ~p", [LeagueCode]);
                 BbcName ->
                     Url = build_url(BbcName),
+                    logger:info("BBC scraper: Fetching URL for ~p", [LeagueCode]),
 
                     case http_client:fetch_url(Url) of
                         {ok, 200, Body} ->
+                            logger:info("BBC scraper: Parsing HTML for ~p", [LeagueCode]),
                             % Parse with Python
                             case python_pool:call_and_await(bbc_pool, {bbc_scraper, parse_bbc_html, [Body]}, 30000) of
                                 {ok, ParsedResults} ->
+                                    logger:info("BBC scraper: Parsed ~p results for ~p", [length(ParsedResults), LeagueCode]),
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
-                                    error_logger:error_msg("BBC parse timeout for ~p~n", [LeagueCode]);
+                                    logger:error("BBC scraper: Parse timeout for ~p", [LeagueCode]);
                                 {error, Error} ->
-                                    error_logger:error_msg("BBC parse error for ~p: ~p~n", [LeagueCode, Error])
+                                    logger:error("BBC scraper: Parse error for ~p: ~p", [LeagueCode, Error])
                             end;
                         {ok, Status, _} ->
-                            error_logger:error_msg("BBC scrape for ~p failed with status ~p~n", [LeagueCode, Status]);
+                            logger:error("BBC scraper: HTTP request for ~p failed with status ~p", [LeagueCode, Status]);
                         {error, Error} ->
-                            error_logger:error_msg("BBC scrape for ~p failed: ~p~n", [LeagueCode, Error])
+                            logger:error("BBC scraper: HTTP request for ~p failed: ~p", [LeagueCode, Error])
                     end
             end;
         {error, Reason} ->
-            error_logger:error_msg("Failed to load league data for ~p: ~p~n", [LeagueCode, Reason])
+            logger:error("BBC scraper: Failed to load league data for ~p: ~p", [LeagueCode, Reason])
     end.
 
 %%====================================================================
@@ -70,11 +73,11 @@ match_and_store_result(Result, LeagueCode, TeamsData) ->
     case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, 10000) of
         {ok, MatchedName} when MatchedName =/= none, MatchedName =/= undefined ->
             gen_server:cast(event_store, {store_event, LeagueCode, MatchedName, Date, bbc, Score}),
-            error_logger:info_msg("Stored BBC event: ~p ~p ~p ~p~n", [LeagueCode, MatchedName, Date, Score]);
+            logger:info("BBC scraper: Stored event ~p: ~p ~p ~p", [LeagueCode, MatchedName, Date, Score]);
         {ok, _} ->
-            error_logger:warning_msg("Could not match BBC event: ~p~n", [Name]);
+            logger:warning("BBC scraper: Could not match event: ~p", [Name]);
         {error, timeout} ->
-            error_logger:warning_msg("Match timeout for BBC event: ~p~n", [Name]);
+            logger:warning("BBC scraper: Match timeout for event: ~p", [Name]);
         {error, Error} ->
-            error_logger:error_msg("Match error for ~p: ~p~n", [Name, Error])
+            logger:error("BBC scraper: Match error for ~p: ~p", [Name, Error])
     end.
