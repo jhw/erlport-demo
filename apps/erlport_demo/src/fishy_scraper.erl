@@ -21,17 +21,14 @@ scrape(LeagueCode) ->
 
                     case http_client:fetch_url(Url) of
                         {ok, 200, Body} ->
-                            % Parse with Python - result comes back as message
-                            python_pool:call_python(fishy_pool, {fishy_scraper, parse_fishy_html, [Body]}, self()),
-
-                            % Wait for result with timeout
-                            receive
-                                {python_result, _WorkerPid, {ok, ParsedResults}} ->
+                            % Parse with Python using async helper
+                            case python_async:call_and_await(fishy_pool, {fishy_scraper, parse_fishy_html, [Body]}, 30000) of
+                                {ok, ParsedResults} ->
                                     process_results(LeagueCode, ParsedResults, Teams);
-                                {python_result, _WorkerPid, {error, Error}} ->
+                                {error, timeout} ->
+                                    error_logger:error_msg("Fishy parse timeout for ~p~n", [LeagueCode]);
+                                {error, Error} ->
                                     error_logger:error_msg("Fishy parse error for ~p: ~p~n", [LeagueCode, Error])
-                            after 30000 ->
-                                error_logger:error_msg("Fishy parse timeout for ~p~n", [LeagueCode])
                             end;
                         {ok, Status, _} ->
                             error_logger:error_msg("Fishy scrape for ~p failed with status ~p~n", [LeagueCode, Status]);
@@ -66,19 +63,15 @@ match_and_store_result(Result, LeagueCode, TeamsData) ->
     Date = maps:get(<<"date">>, Result),
     Score = maps:get(<<"score">>, Result),
 
-    % Call matcher pool with message passing
-    python_pool:call_python(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, self()),
-
-    % Wait for match result with timeout
-    receive
-        {python_result, _WorkerPid, {ok, MatchedName}} when MatchedName =/= none, MatchedName =/= undefined ->
-            % Use cast instead of call to avoid blocking
+    % Call matcher pool using async helper
+    case python_async:call_and_await(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, 10000) of
+        {ok, MatchedName} when MatchedName =/= none, MatchedName =/= undefined ->
             gen_server:cast(event_store, {store_event, LeagueCode, MatchedName, Date, fishy, Score}),
             error_logger:info_msg("Stored Fishy event: ~p ~p ~p ~p~n", [LeagueCode, MatchedName, Date, Score]);
-        {python_result, _WorkerPid, {ok, _}} ->
+        {ok, _} ->
             error_logger:warning_msg("Could not match Fishy event: ~p~n", [Name]);
-        {python_result, _WorkerPid, {error, Error}} ->
+        {error, timeout} ->
+            error_logger:warning_msg("Match timeout for Fishy event: ~p~n", [Name]);
+        {error, Error} ->
             error_logger:error_msg("Match error for ~p: ~p~n", [Name, Error])
-    after 10000 ->
-        error_logger:warning_msg("Match timeout for Fishy event: ~p~n", [Name])
     end.
