@@ -23,16 +23,10 @@ An Erlang application demonstrating ErlPort integration for scraping football re
   │        ├─► config_service (static data)
   │        ├─► event_store (ETS)
   │        ├─► scheduler (task manager, monitors workers)
-  │        └─► python_pools_sup (rest_for_one)
-  │             ├─► bbc_pool_worker_sup (simple_one_for_one)
-  │             │   └─► [2 python_workers]
-  │             ├─► bbc_pool (pool manager)
-  │             ├─► fishy_pool_worker_sup (simple_one_for_one)
-  │             │   └─► [2 python_workers]
-  │             ├─► fishy_pool (pool manager)
-  │             ├─► matcher_pool_worker_sup (simple_one_for_one)
-  │             │   └─► [2 python_workers]
-  │             └─► matcher_pool (pool manager)
+  │        └─► python_pools_sup (one_for_one)
+  │             ├─► bbc_pool (spawns & manages 2 python_workers)
+  │             ├─► fishy_pool (spawns & manages 2 python_workers)
+  │             └─► matcher_pool (spawns & manages 2 python_workers)
   │
   └─► [2] leagues_sup (one_for_one)
            ├─► league_worker (ENG1) → registers tasks
@@ -53,11 +47,10 @@ Scheduler executes: bbc_scraper:scrape/1
 - **All infrastructure together**: Config, event store, scheduler, and Python pools under one supervisor
 - **infrastructure_sup**: Contains ALL foundational services (config, storage, scheduling, Python)
 - **config_service**: Centralized static data loading (no file I/O in init/1 elsewhere)
-- **python_pools_sup**: Proper supervision hierarchy with simple_one_for_one for workers
-- **python_worker**: Individual workers managed by supervisors, not manually restarted
+- **python_pool**: Each pool spawns and monitors its own workers, restarts on failure
+- **Flat supervision**: No unnecessary supervisor nesting, minimal complexity
 - **Monitored task execution**: Scheduler monitors all task processes, no orphans
 - **Message passing**: Python results sent via messages, no callback complexity
-- **Flat league supervision**: leagues_sup directly supervises league_workers (no unnecessary nesting)
 - **Simple dependency**: infrastructure → leagues (2 levels, clean and clear)
 - **Clean shutdown**: Supervisors have infinity timeout, workers have 5s
 - **Separation of concerns**: League workers register, scheduler executes, scrapers do work
@@ -146,8 +139,7 @@ erlport-demo/
 │           ├── fishy_scraper.erl         # Fishy scraping logic
 │           ├── scraper_utils.erl         # Shared scraper utilities
 │           ├── python_pools_sup.erl      # Python pools supervisor
-│           ├── python_pool.erl           # Python pool manager
-│           ├── python_pool_worker_sup.erl # Worker supervisor (simple_one_for_one)
+│           ├── python_pool.erl           # Python pool (spawns & manages workers)
 │           ├── python_worker.erl         # Individual Python worker
 │           ├── leagues_sup.erl           # Leagues supervisor
 │           ├── league_worker.erl         # Per-league worker (registers tasks)
@@ -181,18 +173,18 @@ erlport-demo/
 
 ## Python Process Pools
 
-The application maintains 3 separate Python process pools with proper OTP supervision:
+The application maintains 3 separate Python process pools:
 - **bbc_pool**: 2 workers for BBC HTML parsing
 - **fishy_pool**: 2 workers for Fishy HTML parsing
 - **matcher_pool**: 2 workers for name matching
 
-Each pool has:
-- A `simple_one_for_one` supervisor managing individual `python_worker` processes
-- A pool manager (`python_pool`) that coordinates work distribution
-- Automatic worker restart on failure (supervised by OTP)
-- Request queuing when all workers are busy
-- Message-passing interface (results sent as `{python_result, WorkerPid, Result}`)
-- Worker monitoring to detect failures and update availability
+Each pool:
+- Spawns and monitors its own `python_worker` processes
+- Coordinates work distribution and queuing
+- Automatically restarts workers on failure
+- Queues requests when all workers are busy
+- Uses message-passing interface (results sent as `{python_result, WorkerPid, Result}`)
+- Tracks worker availability via `'DOWN'` messages
 
 ## Event Storage
 

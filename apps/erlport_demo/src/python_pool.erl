@@ -2,14 +2,15 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, call_python/3]).
+-export([start_link/3, call_python/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -record(state, {
     pool_name :: atom(),
-    supervisor_pid :: pid(),
+    script_name :: atom(),
+    pool_size :: integer(),
     request_queue :: queue:queue(),
     available_workers :: queue:queue(),
     busy_workers :: sets:set()
@@ -19,8 +20,8 @@
 %% API functions
 %%====================================================================
 
-start_link(PoolName, SupervisorPid) ->
-    gen_server:start_link({local, PoolName}, ?MODULE, [PoolName, SupervisorPid], []).
+start_link(PoolName, ScriptName, PoolSize) ->
+    gen_server:start_link({local, PoolName}, ?MODULE, [PoolName, ScriptName, PoolSize], []).
 
 %% Call Python function asynchronously - result sent as {python_result, WorkerPid, Result}
 call_python(PoolName, {Module, Function, Args}, CallerPid) ->
@@ -30,24 +31,28 @@ call_python(PoolName, {Module, Function, Args}, CallerPid) ->
 %% gen_server callbacks
 %%====================================================================
 
-init([PoolName, SupervisorPid]) ->
+init([PoolName, ScriptName, PoolSize]) ->
     process_flag(trap_exit, true),
 
-    % Get initial workers from supervisor
-    Workers = supervisor:which_children(SupervisorPid),
-    WorkerPids = [Pid || {_Id, Pid, _Type, _Modules} <- Workers, is_pid(Pid)],
+    % Spawn workers directly
+    Workers = lists:map(
+        fun(_) ->
+            {ok, Pid} = python_worker:start_link(ScriptName),
+            erlang:monitor(process, Pid),
+            Pid
+        end,
+        lists:seq(1, PoolSize)
+    ),
 
-    % Monitor all workers
-    lists:foreach(fun(Pid) -> erlang:monitor(process, Pid) end, WorkerPids),
-
-    AvailableWorkers = queue:from_list(WorkerPids),
+    AvailableWorkers = queue:from_list(Workers),
 
     error_logger:info_msg("Python pool ~p started with ~p workers~n",
-        [PoolName, length(WorkerPids)]),
+        [PoolName, PoolSize]),
 
     {ok, #state{
         pool_name = PoolName,
-        supervisor_pid = SupervisorPid,
+        script_name = ScriptName,
+        pool_size = PoolSize,
         request_queue = queue:new(),
         available_workers = AvailableWorkers,
         busy_workers = sets:new()
@@ -105,9 +110,11 @@ handle_info({python_result, WorkerPid, _Result}, State) ->
     end;
 
 handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
-    % A worker died - supervisor will restart it
-    error_logger:warning_msg("Python worker ~p died: ~p, will be restarted by supervisor~n",
-        [Pid, Reason]),
+    % A worker died - restart it ourselves
+    case Reason of
+        normal -> ok;
+        _ -> error_logger:warning_msg("Python worker ~p died: ~p, restarting~n", [Pid, Reason])
+    end,
 
     % Remove from busy set if present
     NewBusy = sets:del_element(Pid, State#state.busy_workers),
@@ -117,40 +124,35 @@ handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
     NewAvailableList = lists:delete(Pid, AvailableList),
     NewAvailable = queue:from_list(NewAvailableList),
 
-    % Wait a bit then query supervisor for new worker
-    erlang:send_after(100, self(), check_new_workers),
+    % Spawn replacement worker
+    case python_worker:start_link(State#state.script_name) of
+        {ok, NewPid} ->
+            erlang:monitor(process, NewPid),
 
-    {noreply, State#state{
-        available_workers = NewAvailable,
-        busy_workers = NewBusy
-    }};
-
-handle_info(check_new_workers, State) ->
-    % Get current workers from supervisor
-    Workers = supervisor:which_children(State#state.supervisor_pid),
-    WorkerPids = [Pid || {_Id, Pid, _Type, _Modules} <- Workers, is_pid(Pid)],
-
-    % Find workers we're not tracking yet
-    CurrentAvailable = sets:from_list(queue:to_list(State#state.available_workers)),
-    AllTracked = sets:union(CurrentAvailable, State#state.busy_workers),
-    AllWorkers = sets:from_list(WorkerPids),
-    NewWorkers = sets:to_list(sets:subtract(AllWorkers, AllTracked)),
-
-    % Monitor new workers and add to available queue
-    lists:foreach(fun(Pid) -> erlang:monitor(process, Pid) end, NewWorkers),
-    NewAvailable = lists:foldl(
-        fun(Pid, Q) -> queue:in(Pid, Q) end,
-        State#state.available_workers,
-        NewWorkers
-    ),
-
-    case length(NewWorkers) of
-        0 -> ok;
-        N -> error_logger:info_msg("Python pool ~p discovered ~p new workers~n",
-            [State#state.pool_name, N])
-    end,
-
-    {noreply, State#state{available_workers = NewAvailable}};
+            % Check if there are queued requests
+            case queue:out(State#state.request_queue) of
+                {{value, {Module, Function, Args, _CallerPid}}, NewQueue} ->
+                    % Assign queued request to new worker
+                    python_worker:call_python(NewPid, Module, Function, Args),
+                    {noreply, State#state{
+                        available_workers = NewAvailable,
+                        busy_workers = sets:add_element(NewPid, NewBusy),
+                        request_queue = NewQueue
+                    }};
+                {empty, _} ->
+                    % No queued requests, add to available
+                    {noreply, State#state{
+                        available_workers = queue:in(NewPid, NewAvailable),
+                        busy_workers = NewBusy
+                    }}
+            end;
+        {error, RestartReason} ->
+            error_logger:error_msg("Failed to restart Python worker: ~p~n", [RestartReason]),
+            {noreply, State#state{
+                available_workers = NewAvailable,
+                busy_workers = NewBusy
+            }}
+    end;
 
 handle_info(_Info, State) ->
     {noreply, State}.
