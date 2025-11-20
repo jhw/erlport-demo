@@ -160,6 +160,7 @@ handle_cast({store_event, League, Name, Date, Source, Score}, State) ->
                     }
             end,
             ets:insert(State#state.table, NewEvent),
+            logger:debug("Event store: Created new event ~p: ~p ~p from ~p", [League, Name, Date, Source]),
             NewEvent;
         [ExistingEvent] ->
             % Update existing event
@@ -176,6 +177,7 @@ handle_cast({store_event, League, Name, Date, Source, Score}, State) ->
                     }
             end,
             ets:insert(State#state.table, UpdatedEvent),
+            logger:debug("Event store: Updated event ~p: ~p ~p from ~p", [League, Name, Date, Source]),
             UpdatedEvent
     end,
     {noreply, State};
