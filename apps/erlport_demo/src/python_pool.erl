@@ -85,9 +85,12 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
 handle_cast({call_python, Module, Function, Args, CallerPid}, State) ->
+    logger:info("~p: Request ~p:~p from ~p", [State#state.pool_name, Module, Function, CallerPid]),
+
     case queue:out(State#state.available_workers) of
         {{value, Worker}, NewAvailable} ->
             % Worker available, assign immediately
+            logger:debug("~p: Assigned to worker ~p", [State#state.pool_name, Worker]),
             python_worker:call_python(Worker, Module, Function, Args),
             NewBusy = sets:add_element(Worker, State#state.busy_workers),
             {noreply, State#state{
@@ -96,6 +99,9 @@ handle_cast({call_python, Module, Function, Args, CallerPid}, State) ->
             }};
         {empty, _} ->
             % No workers available, queue the request
+            QueueLen = queue:len(State#state.request_queue),
+            logger:warning("~p: All workers busy, queuing request (queue length: ~p)",
+                [State#state.pool_name, QueueLen + 1]),
             Request = {Module, Function, Args, CallerPid},
             NewQueue = queue:in(Request, State#state.request_queue),
             {noreply, State#state{request_queue = NewQueue}}
@@ -104,8 +110,16 @@ handle_cast({call_python, Module, Function, Args, CallerPid}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({python_result, WorkerPid, _Result}, State) ->
-    % Worker finished, mark as available
+handle_info({python_result, WorkerPid, Result}, State) ->
+    % Worker finished, log result
+    case Result of
+        {ok, _} ->
+            logger:debug("~p: Worker ~p completed successfully", [State#state.pool_name, WorkerPid]);
+        {error, Reason} ->
+            logger:error("~p: Worker ~p error: ~p", [State#state.pool_name, WorkerPid, Reason])
+    end,
+
+    % Mark as available
     case sets:is_element(WorkerPid, State#state.busy_workers) of
         true ->
             NewBusy = sets:del_element(WorkerPid, State#state.busy_workers),
@@ -114,6 +128,8 @@ handle_info({python_result, WorkerPid, _Result}, State) ->
             case queue:out(State#state.request_queue) of
                 {{value, {Module, Function, Args, _CallerPid}}, NewQueue} ->
                     % Assign queued request to this worker
+                    logger:info("~p: Assigning queued request ~p:~p to worker ~p",
+                        [State#state.pool_name, Module, Function, WorkerPid]),
                     python_worker:call_python(WorkerPid, Module, Function, Args),
                     {noreply, State#state{
                         request_queue = NewQueue,
@@ -135,8 +151,10 @@ handle_info({python_result, WorkerPid, _Result}, State) ->
 handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
     % A worker died - restart it ourselves
     case Reason of
-        normal -> ok;
-        _ -> error_logger:warning_msg("Python worker ~p died: ~p, restarting~n", [Pid, Reason])
+        normal ->
+            logger:debug("~p: Worker ~p terminated normally", [State#state.pool_name, Pid]);
+        _ ->
+            logger:error("~p: Worker ~p died: ~p, restarting", [State#state.pool_name, Pid, Reason])
     end,
 
     % Remove from busy set if present
@@ -150,12 +168,15 @@ handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
     % Spawn replacement worker
     case python_worker:start_link(State#state.script_name) of
         {ok, NewPid} ->
+            logger:info("~p: Restarted worker ~p", [State#state.pool_name, NewPid]),
             erlang:monitor(process, NewPid),
 
             % Check if there are queued requests
             case queue:out(State#state.request_queue) of
                 {{value, {Module, Function, Args, _CallerPid}}, NewQueue} ->
                     % Assign queued request to new worker
+                    logger:info("~p: Assigning queued request ~p:~p to new worker ~p",
+                        [State#state.pool_name, Module, Function, NewPid]),
                     python_worker:call_python(NewPid, Module, Function, Args),
                     {noreply, State#state{
                         available_workers = NewAvailable,
@@ -170,7 +191,7 @@ handle_info({'DOWN', _Ref, process, Pid, Reason}, State) ->
                     }}
             end;
         {error, RestartReason} ->
-            error_logger:error_msg("Failed to restart Python worker: ~p~n", [RestartReason]),
+            logger:error("~p: Failed to restart worker: ~p", [State#state.pool_name, RestartReason]),
             {noreply, State#state{
                 available_workers = NewAvailable,
                 busy_workers = NewBusy
