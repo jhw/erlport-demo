@@ -4,7 +4,7 @@ Ported from TypeScript outrights-sst/packages/outrights-data/src/parsers/the-fis
 Fetches match results from thefishy.co.uk
 """
 
-import re
+from lxml import html as lxml_html
 from datetime import datetime
 
 
@@ -49,70 +49,63 @@ def remove_duplicates(results):
     return sorted(filtered, key=lambda x: (x['date'], x['name']))
 
 
-def filter_results(html):
-    """Parse HTML and extract results"""
+def filter_results(html_content):
+    """Parse HTML and extract results using lxml"""
     results = []
-    current_date = None
+
+    # Parse HTML with lxml
+    tree = lxml_html.fromstring(html_content)
 
     # Find table with table-results class
-    table_match = re.search(r'<table[^>]*class="[^"]*table-results[^"]*"[^>]*>(.*?)</table>', html, re.DOTALL)
-    if not table_match:
+    tables = tree.xpath("//table[contains(@class, 'table-results')]")
+    if not tables:
         raise Exception("matches table not found")
 
-    table_html = table_match.group(1)
+    table = tables[0]
+    current_date = None
 
-    # Find all tr elements
-    tr_matches = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL)
+    # Find all tr elements in the table
+    for tr in table.xpath(".//tr"):
+        tr_class = tr.get('class', '')
 
-    for tr_html in tr_matches:
-        # Handle both single and double quotes for class attribute
-        class_match = re.search(r"class=['\"]([^'\"]*)['\"]", tr_html)
-        if not class_match:
-            continue
-
-        class_name = class_match.group(1)
-
-        if class_name == "success":
-            # Extract date from this row
-            text_content = re.sub(r'<[^>]*>', ' ', tr_html)
-            clean_content = clean_text(text_content)
-            parts = clean_content.split(' ')
-            if len(parts) > 1:
+        if tr_class == 'success':
+            # Extract date from th element
+            th_text = ''.join(tr.xpath(".//th//text()"))
+            parts = clean_text(th_text).split()
+            if len(parts) >= 1:
+                # Extract date (format: "Sun 09-Nov-2025" -> "09-Nov-2025")
+                date_str = parts[-1] if len(parts) > 1 else parts[0]
                 try:
-                    current_date = parse_date(parts[1])
+                    current_date = parse_date(date_str)
                 except:
                     continue
 
-        elif class_name == "cats" and current_date:
-            # Extract team names and scores
-            team_matches = re.findall(r"<a[^>]*class=['\"]cats['\"][^>]*>(.*?)</a>", tr_html)
-            if len(team_matches) != 2:
+        elif tr_class == 'cats' and current_date:
+            # Extract team names from a.cats elements
+            team_links = tr.xpath(".//a[@class='cats']")
+            if len(team_links) != 2:
                 continue
 
-            team_names = [clean_text(re.sub(r'<[^>]*>', '', match)) for match in team_matches]
+            team_names = [clean_text(link.text_content()) for link in team_links]
 
-            # Look for score in catsc class
-            score_match = re.search(r"<td[^>]*class=['\"]catsc['\"][^>]*><a[^>]*>(.*?)</a>", tr_html)
-            if not score_match:
-                score_match = re.search(r"<td[^>]*class=['\"]catsc['\"][^>]*>([^<]*)", tr_html)
+            # Extract score from td.catsc > a
+            score_elements = tr.xpath(".//td[contains(@class, 'catsc')]/a")
+            if not score_elements:
+                continue
 
-            if score_match and score_match.group(1):
-                raw_score = score_match.group(1).strip()
-                if raw_score and '<' not in raw_score:  # Skip in-play matches with spans
-                    # Decode HTML entities (specifically handle the non-breaking hyphen &#8209;)
-                    raw_score = re.sub(r'&#8209;', '-', raw_score)
-                    raw_score = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), raw_score)
+            raw_score = score_elements[0].text_content().strip()
+            if raw_score:
+                # Clean score - replace various dash characters with standard hyphen
+                score = raw_score.replace('‑', '-').replace('–', '-').replace('—', '-')
+                # Remove any non-digit/non-dash characters
+                score = ''.join(c for c in score if c.isdigit() or c == '-')
 
-                    # Clean score and join with dash
-                    score = re.sub(r'[^\w\s-]', ' ', raw_score)
-                    score = '-'.join([s for s in score.split() if s])
-
-                    if score:
-                        results.append({
-                            'date': current_date,
-                            'name': f"{team_names[0]} vs {team_names[1]}",
-                            'score': score
-                        })
+                if score and '-' in score:
+                    results.append({
+                        'date': current_date,
+                        'name': f"{team_names[0]} vs {team_names[1]}",
+                        'score': score
+                    })
 
     return remove_duplicates(results)
 

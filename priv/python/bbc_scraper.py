@@ -4,7 +4,7 @@ Ported from TypeScript outrights-sst/packages/outrights-data/src/parsers/bbc-res
 Parses match results from BBC Sport HTML content
 """
 
-import re
+from lxml import html as lxml_html
 import json
 from datetime import datetime
 
@@ -21,34 +21,36 @@ def parse_bbc_results(html_content):
         list - List of dicts with keys: date, name, score
     """
     try:
-        # Split HTML by script tags and find the one with __INITIAL_DATA__
-        script_pattern = r'<script[^>]*>|</script>'
-        script_tags = re.split(script_pattern, html_content)
+        # Parse HTML with lxml
+        tree = lxml_html.fromstring(html_content)
+
+        # Find all script tags and look for the one with __INITIAL_DATA__
+        script_elements = tree.xpath('//script')
 
         initial_data_script = None
-        for script in script_tags:
-            if 'window.__INITIAL_DATA__' in script:
-                initial_data_script = script
+        for script in script_elements:
+            script_text = script.text_content()
+            if 'window.__INITIAL_DATA__' in script_text:
+                initial_data_script = script_text
                 break
 
         if not initial_data_script:
             raise Exception('No BBC initial data script found in HTML')
 
         # Extract JSON from the variable declaration
-        variable_match = re.search(
-            r'window\.__INITIAL_DATA__\s*=\s*(.+?)(?:;|$)',
-            initial_data_script,
-            re.DOTALL
-        )
+        # Find the start of the JSON data after "window.__INITIAL_DATA__ = "
+        start_marker = 'window.__INITIAL_DATA__'
+        start_idx = initial_data_script.find(start_marker)
+        if start_idx == -1:
+            raise Exception('Could not find __INITIAL_DATA__ marker')
 
-        if not variable_match:
-            raise Exception('Could not extract JSON from initial data script')
-
-        json_string = variable_match.group(1).strip()
+        # Skip past the marker and the " = " part
+        json_start = initial_data_script.find('=', start_idx) + 1
+        json_string = initial_data_script[json_start:].strip()
 
         # Remove trailing semicolon if present
         if json_string.endswith(';'):
-            json_string = json_string[:-1]
+            json_string = json_string[:-1].strip()
 
         # If it's a quoted string, remove quotes and unescape
         if json_string.startswith('"') and json_string.endswith('"'):

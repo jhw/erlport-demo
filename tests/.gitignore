@@ -1,0 +1,2 @@
+# Test fixtures - HTML files can be large and change frequently
+python/fixtures/*.html

@@ -18,3 +18,8 @@ logs
 *.iml
 rebar3.crashdump
 *~
+
+# Python virtual environment (for local development only)
+venv/
+__pycache__/
+*.pyc
