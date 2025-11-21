@@ -5,7 +5,11 @@
     {mod, {erlport_demo_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        gun,
+        cowboy,
+        thoas,
+        erlport
     ]},
     {env, []},
     {modules, []},
