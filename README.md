@@ -152,17 +152,19 @@ erlport-demo/
 │           ├── league_worker.erl         # Per-league worker (registers tasks)
 │           ├── http_client.erl           # Gun-based HTTP client
 │           └── api_handler.erl           # Cowboy HTTP handler
-├── priv/
-│   ├── python/
-│   │   ├── bbc_scraper.py               # BBC HTML parser
-│   │   ├── fishy_scraper.py             # Fishy HTML parser
-│   │   └── name_matcher.py              # Name normalization
-│   └── data/
-│       ├── leagues/
-│       │   └── leagues.json             # League configuration
-│       └── teams/
-│           ├── ENG1.json                # Premier League teams
-│           └── ENG2.json                # Championship teams
+├── apps/erlport_demo/
+│   ├── src/                             # Erlang source files
+│   └── priv/
+│       ├── python/
+│       │   ├── bbc_scraper.py           # BBC HTML parser
+│       │   ├── fishy_scraper.py         # Fishy HTML parser
+│       │   └── name_matcher.py          # Name normalization
+│       └── data/
+│           ├── leagues/
+│           │   └── leagues.json         # League configuration
+│           └── teams/
+│               ├── ENG1.json            # Premier League teams
+│               └── ENG2.json            # Championship teams
 ├── scripts/
 │   ├── compile.sh                       # Compile project
 │   ├── clean.sh                         # Clean build artifacts
