@@ -12,7 +12,10 @@
 %%====================================================================
 
 start_link(ScriptName, PoolName) ->
-    supervisor:start_link(?MODULE, [ScriptName, PoolName]).
+    % Register with <PoolName>_worker_sup so pool can find us
+    % This is standard OTP - registered names are the coordination mechanism
+    SupName = list_to_atom(atom_to_list(PoolName) ++ "_worker_sup"),
+    supervisor:start_link({local, SupName}, ?MODULE, [ScriptName, PoolName]).
 
 %% Start a new worker under this supervisor
 start_worker(SupPid) ->

@@ -91,14 +91,14 @@ init([PoolName, ScriptName, PoolConfig]) ->
     PoolSize = maps:get(pool_size, PoolConfig, 2),
     WorkerTimeoutMs = maps:get(worker_timeout_ms, PoolConfig, 45000),
 
-    % Get worker supervisor PID (our sibling in the supervision tree)
-    % We are started by python_pool_sup which started python_worker_sup first
-    PoolSupName = list_to_atom(atom_to_list(PoolName) ++ "_sup"),
-    WorkerSupPid = case supervisor:which_children(PoolSupName) of
-        [{worker_sup, SupPid, supervisor, _} | _] when is_pid(SupPid) -> SupPid;
-        Children ->
-            logger:error("~p: Could not find worker_sup in children: ~p", [PoolName, Children]),
-            error({worker_sup_not_found, Children})
+    % Find worker supervisor by registered name
+    % Standard OTP pattern - rest_for_one ensures it's already started and registered
+    WorkerSupName = list_to_atom(atom_to_list(PoolName) ++ "_worker_sup"),
+    WorkerSupPid = case whereis(WorkerSupName) of
+        Pid when is_pid(Pid) -> Pid;
+        undefined ->
+            logger:error("~p: Could not find worker_sup ~p", [PoolName, WorkerSupName]),
+            error({worker_sup_not_found, WorkerSupName})
     end,
 
     % Request workers from supervisor - they will auto-register when ready
