@@ -59,8 +59,10 @@ handle_cast({call_python, Module, Function, Args, CallerPid, PoolPid, TimeoutMs}
 
         % Spawn the actual Python call in a separate process
         CallPid = spawn_link(fun() ->
+            logger:info("Python worker ~p: Starting python:call for ~p:~p", [WorkerPid, Module, Function]),
             try
                 Result = python:call(State#state.python_pid, Module, Function, Args),
+                logger:info("Python worker ~p: python:call completed, sending to worker", [WorkerPid]),
                 WorkerPid ! {CallRef, {ok, Result}}
             catch
                 Error:Reason:Stacktrace ->
@@ -71,16 +73,20 @@ handle_cast({call_python, Module, Function, Args, CallerPid, PoolPid, TimeoutMs}
                     WorkerPid ! {CallRef, {error, {Error, Reason}}}
             end
         end),
+        logger:info("Python worker ~p: Spawned call process ~p", [WorkerPid, CallPid]),
 
         % Wait for result or timeout
         receive
             {CallRef, Result} ->
                 % Python call completed in time
+                logger:info("Python worker ~p: Received result from call process", [WorkerPid]),
                 case Result of
                     {ok, Value} ->
+                        logger:info("Python worker ~p: Sending result to caller ~p", [WorkerPid, CallerPid]),
                         CallerPid ! {python_result, WorkerPid, {ok, Value}},
                         PoolPid ! {worker_done, WorkerPid, {ok, Value}};
                     {error, ErrorReason} ->
+                        logger:info("Python worker ~p: Sending error to caller ~p", [WorkerPid, CallerPid]),
                         CallerPid ! {python_result, WorkerPid, {error, ErrorReason}},
                         PoolPid ! {worker_done, WorkerPid, {error, ErrorReason}}
                 end
