@@ -9,22 +9,42 @@ import time
 import os
 from pathlib import Path
 
+try:
+    from colorama import Fore, Style, init
+    init(autoreset=False)  # Don't auto-reset after each print
 
-# ANSI color codes
-class Colors:
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
+    # Use colorama colors
+    class Colors:
+        RESET = Style.RESET_ALL
+        BOLD = Style.BRIGHT
 
-    # Log levels
-    DEBUG = '\033[36m'      # Cyan
-    INFO = '\033[32m'       # Green
-    WARNING = '\033[33m'    # Yellow
-    ERROR = '\033[31m'      # Red
+        # Log levels
+        DEBUG = Fore.CYAN
+        INFO = Fore.GREEN
+        WARNING = Fore.YELLOW
+        ERROR = Fore.RED
 
-    # Components
-    TIME = '\033[90m'       # Gray
-    MODULE = '\033[35m'     # Magenta
-    PID = '\033[34m'        # Blue
+        # Components
+        TIME = Fore.BLACK + Style.BRIGHT  # Bright black = gray
+        MODULE = Fore.MAGENTA
+        PID = Fore.BLUE
+
+except ImportError:
+    # Fallback to ANSI codes if colorama not installed
+    class Colors:
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+
+        # Log levels
+        DEBUG = '\033[36m'      # Cyan
+        INFO = '\033[32m'       # Green
+        WARNING = '\033[33m'    # Yellow
+        ERROR = '\033[31m'      # Red
+
+        # Components
+        TIME = '\033[90m'       # Gray
+        MODULE = '\033[35m'     # Magenta
+        PID = '\033[34m'        # Blue
 
 
 def colorize_line(line):
