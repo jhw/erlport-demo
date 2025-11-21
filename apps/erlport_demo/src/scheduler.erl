@@ -48,16 +48,22 @@ init([ScraperConfigs]) ->
     % Load all leagues and schedule their scraper tasks
     % This replaces the league_worker layer - scheduler owns all tasks directly
     {ok, Leagues} = config_service:get_all_leagues(),
-    lists:foreach(
-        fun(League) -> schedule_league_tasks(League, ScraperConfigs) end,
+
+    % Build initial task state directly (can't call gen_server:call during init)
+    InitialTasks = lists:foldl(
+        fun(League, TasksAcc) ->
+            schedule_league_tasks_init(League, ScraperConfigs, TasksAcc)
+        end,
+        #{},
         Leagues
     ),
 
     logger:info("Scheduler initialized with tasks for ~p leagues", [length(Leagues)]),
-    {ok, #state{tasks = #{}, scraper_config = ScraperConfigs}}.
+    {ok, #state{tasks = InitialTasks, scraper_config = ScraperConfigs}}.
 
-%% Internal function to schedule scraper tasks for a league
-schedule_league_tasks(League, ScraperConfigs) ->
+%% Internal function to schedule scraper tasks for a league during init
+%% Builds tasks directly without calling gen_server:call
+schedule_league_tasks_init(League, ScraperConfigs, TasksAcc) ->
     LeagueCode = maps:get(<<"code">>, League),
 
     % Helper to get scraper timing config
@@ -68,31 +74,46 @@ schedule_league_tasks(League, ScraperConfigs) ->
         end
     end,
 
+    % Helper to create task directly
+    CreateTask = fun(TaskId, IntervalMs, MFA, InitialDelayMs, Acc) ->
+        TimerRef = erlang:send_after(InitialDelayMs, self(), {execute_task, TaskId}),
+        Task = #task{
+            id = TaskId,
+            interval_ms = IntervalMs,
+            mfa = MFA,
+            timer_ref = TimerRef
+        },
+        logger:info("Scheduled task ~p to run every ~p ms", [TaskId, IntervalMs]),
+        maps:put(TaskId, Task, Acc)
+    end,
+
     % Schedule BBC scraper if league has bbcName
-    case maps:get(<<"bbcName">>, League, undefined) of
-        undefined -> ok;
+    TasksAcc1 = case maps:get(<<"bbcName">>, League, undefined) of
+        undefined -> TasksAcc;
         _ ->
             BbcConfig = GetScraperConfig(bbc_scraper),
             BbcTaskId = {bbc_scraper, LeagueCode},
-            schedule_task(
+            CreateTask(
                 BbcTaskId,
                 maps:get(interval_ms, BbcConfig),
                 {bbc_scraper, scrape, [LeagueCode]},
-                maps:get(initial_delay_ms, BbcConfig)
+                maps:get(initial_delay_ms, BbcConfig),
+                TasksAcc
             )
     end,
 
     % Schedule Fishy scraper if league has thefishyId
     case maps:get(<<"thefishyId">>, League, undefined) of
-        undefined -> ok;
+        undefined -> TasksAcc1;
         _ ->
             FishyConfig = GetScraperConfig(fishy_scraper),
             FishyTaskId = {fishy_scraper, LeagueCode},
-            schedule_task(
+            CreateTask(
                 FishyTaskId,
                 maps:get(interval_ms, FishyConfig),
                 {fishy_scraper, scrape, [LeagueCode]},
-                maps:get(initial_delay_ms, FishyConfig)
+                maps:get(initial_delay_ms, FishyConfig),
+                TasksAcc1
             )
     end.
 
