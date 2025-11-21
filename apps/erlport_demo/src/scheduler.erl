@@ -11,10 +11,7 @@
     id :: term(),
     interval_ms :: integer(),
     mfa :: {module(), atom(), list()},
-    timer_ref :: reference() | undefined,
-    in_progress :: boolean(),
-    worker_pid :: pid() | undefined,
-    worker_monitor :: reference() | undefined
+    timer_ref :: reference() | undefined
 }).
 
 -record(state, {
@@ -46,7 +43,34 @@ cancel_task(Id) ->
 
 init([]) ->
     logger:info("Scheduler started"),
+
+    % Load all leagues and schedule their scraper tasks
+    % This replaces the league_worker layer - scheduler owns all tasks directly
+    {ok, Leagues} = config_service:get_all_leagues(),
+    lists:foreach(fun schedule_league_tasks/1, Leagues),
+
+    logger:info("Scheduler initialized with tasks for ~p leagues", [length(Leagues)]),
     {ok, #state{tasks = #{}}}.
+
+%% Internal function to schedule scraper tasks for a league
+schedule_league_tasks(League) ->
+    LeagueCode = maps:get(<<"code">>, League),
+
+    % Schedule BBC scraper if league has bbcName
+    case maps:get(<<"bbcName">>, League, undefined) of
+        undefined -> ok;
+        _ ->
+            BbcTaskId = {bbc_scraper, LeagueCode},
+            schedule_task(BbcTaskId, 60000, {bbc_scraper, scrape, [LeagueCode]}, 1000)
+    end,
+
+    % Schedule Fishy scraper if league has thefishyId
+    case maps:get(<<"thefishyId">>, League, undefined) of
+        undefined -> ok;
+        _ ->
+            FishyTaskId = {fishy_scraper, LeagueCode},
+            schedule_task(FishyTaskId, 60000, {fishy_scraper, scrape, [LeagueCode]}, 1000)
+    end.
 
 handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) ->
     % Cancel existing task if any
@@ -67,10 +91,7 @@ handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) 
         id = Id,
         interval_ms = IntervalMs,
         mfa = MFA,
-        timer_ref = TimerRef,
-        in_progress = false,
-        worker_pid = undefined,
-        worker_monitor = undefined
+        timer_ref = TimerRef
     },
 
     logger:info("Scheduled task ~p to run every ~p ms", [Id, IntervalMs]),
@@ -102,108 +123,16 @@ handle_info({execute_task, Id}, State) ->
             % Task was cancelled
             {noreply, State};
         Task ->
-            % Check if task is already in progress (visibility timeout)
-            case Task#task.in_progress of
-                true ->
-                    % Task still running, skip this execution and reschedule
-                    logger:warning("Task ~p still in progress, skipping execution", [Id]),
-                    TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
-                    UpdatedTask = Task#task{timer_ref = TimerRef},
-                    {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}};
-                false ->
-                    % Execute task in separate monitored process
-                    {M, F, A} = Task#task.mfa,
-                    logger:info("Executing task ~p: ~p:~p", [Id, M, F]),
-                    Self = self(),
-                    WorkerPid = spawn(fun() ->
-                        try
-                            apply(M, F, A),
-                            Self ! {task_complete, Id, self()}
-                        catch
-                            Error:Reason:Stacktrace ->
-                                logger:error(
-                                    "Task ~p failed: ~p:~p~nStacktrace: ~p",
-                                    [Id, Error, Reason, Stacktrace]
-                                ),
-                                Self ! {task_complete, Id, self()}
-                        end
-                    end),
+            % Fire and forget: spawn task and immediately reschedule
+            % Scrapers handle their own errors and logging
+            {M, F, A} = Task#task.mfa,
+            logger:info("Executing task ~p: ~p:~p", [Id, M, F]),
+            proc_lib:spawn_link(fun() -> apply(M, F, A) end),
 
-                    % Monitor the worker process
-                    MonitorRef = erlang:monitor(process, WorkerPid),
-
-                    % Mark task as in progress with worker info
-                    UpdatedTask = Task#task{
-                        in_progress = true,
-                        worker_pid = WorkerPid,
-                        worker_monitor = MonitorRef
-                    },
-                    NewState = State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)},
-
-                    {noreply, NewState}
-            end
-    end;
-
-handle_info({task_complete, Id, _WorkerPid}, State) ->
-    case maps:get(Id, State#state.tasks, undefined) of
-        undefined ->
-            {noreply, State};
-        Task ->
-            % Demonitor the worker
-            case Task#task.worker_monitor of
-                undefined -> ok;
-                MonitorRef -> erlang:demonitor(MonitorRef, [flush])
-            end,
-
-            logger:info("Task ~p completed successfully", [Id]),
-
-            % Mark task as not in progress and schedule next execution
+            % Schedule next execution
             TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
-            UpdatedTask = Task#task{
-                in_progress = false,
-                timer_ref = TimerRef,
-                worker_pid = undefined,
-                worker_monitor = undefined
-            },
+            UpdatedTask = Task#task{timer_ref = TimerRef},
             {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}}
-    end;
-
-handle_info({'DOWN', MonitorRef, process, _Pid, Reason}, State) ->
-    % A task worker died - find which task and reschedule
-    TaskEntry = maps:fold(
-        fun(Id, Task, Acc) ->
-            case Task#task.worker_monitor of
-                MonitorRef -> {found, Id, Task};
-                _ -> Acc
-            end
-        end,
-        not_found,
-        State#state.tasks
-    ),
-
-    case TaskEntry of
-        {found, Id, Task} ->
-            case Reason of
-                normal ->
-                    ok;
-                _ ->
-                    logger:warning(
-                        "Task ~p worker died abnormally: ~p",
-                        [Id, Reason]
-                    )
-            end,
-
-            % Mark task as not in progress and schedule next execution
-            TimerRef = erlang:send_after(Task#task.interval_ms, self(), {execute_task, Id}),
-            UpdatedTask = Task#task{
-                in_progress = false,
-                timer_ref = TimerRef,
-                worker_pid = undefined,
-                worker_monitor = undefined
-            },
-            {noreply, State#state{tasks = maps:put(Id, UpdatedTask, State#state.tasks)}};
-        not_found ->
-            {noreply, State}
     end;
 
 handle_info(_Info, State) ->

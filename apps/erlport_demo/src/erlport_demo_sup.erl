@@ -10,19 +10,17 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-    % Use rest_for_one strategy:
-    % If infrastructure fails, restart infrastructure + leagues
-    % If leagues fail, only restart leagues
-    % Infrastructure includes: event_store, scheduler, python_pools
-    % This ensures dependencies are properly restarted
+    % Simple one_for_one strategy - only infrastructure supervisor
+    % Scheduler loads league configuration and schedules tasks directly
     SupFlags = #{
-        strategy => rest_for_one,
+        strategy => one_for_one,
         intensity => 10,
         period => 10
     },
 
     Children = [
         % Infrastructure supervisor - event_store, scheduler, python_pools
+        % Scheduler handles league task scheduling in its init/1
         #{
             id => infrastructure_sup,
             start => {infrastructure_sup, start_link, []},
@@ -30,15 +28,6 @@ init([]) ->
             shutdown => infinity,
             type => supervisor,
             modules => [infrastructure_sup]
-        },
-        % Leagues supervisor - depends on infrastructure
-        #{
-            id => leagues_sup,
-            start => {leagues_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [leagues_sup]
         }
     ],
 

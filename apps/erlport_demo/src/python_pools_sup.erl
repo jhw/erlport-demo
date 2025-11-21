@@ -25,34 +25,35 @@ init([]) ->
         period => 10
     },
 
-    % Each pool manager spawns and manages its own workers
+    % Each child is a supervision subtree: worker_sup + pool
+    % Proper OTP pattern: supervisors manage workers, pools distribute work
     Children = [
-        % BBC pool
+        % BBC pool subtree (worker supervisor + pool manager)
         #{
-            id => bbc_pool,
-            start => {python_pool, start_link, [bbc_pool, bbc_scraper, 2]},
+            id => bbc_pool_sup,
+            start => {python_pool_sup, start_link, [bbc_pool, bbc_scraper, 2]},
             restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [python_pool]
+            shutdown => infinity,  % Supervisor
+            type => supervisor,
+            modules => [python_pool_sup]
         },
-        % Fishy pool
+        % Fishy pool subtree
         #{
-            id => fishy_pool,
-            start => {python_pool, start_link, [fishy_pool, fishy_scraper, 2]},
+            id => fishy_pool_sup,
+            start => {python_pool_sup, start_link, [fishy_pool, fishy_scraper, 2]},
             restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [python_pool]
+            shutdown => infinity,  % Supervisor
+            type => supervisor,
+            modules => [python_pool_sup]
         },
-        % Matcher pool
+        % Matcher pool subtree
         #{
-            id => matcher_pool,
-            start => {python_pool, start_link, [matcher_pool, name_matcher, 2]},
+            id => matcher_pool_sup,
+            start => {python_pool_sup, start_link, [matcher_pool, name_matcher, 2]},
             restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [python_pool]
+            shutdown => infinity,  % Supervisor
+            type => supervisor,
+            modules => [python_pool_sup]
         }
     ],
 
