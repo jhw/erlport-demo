@@ -74,6 +74,14 @@ Scheduler executes: bbc_scraper:scrape/1
 ./scripts/run.sh
 ```
 
+3. Watch logs (in a separate terminal):
+```bash
+./scripts/watch_logs.sh
+```
+
+The application logs to `log/erlport_demo.log` with automatic rotation (10MB max, 5 files).
+The console stays clean for interactive shell commands.
+
 ## Usage
 
 ### HTTP API
@@ -159,7 +167,12 @@ erlport-demo/
 │   ├── compile.sh                       # Compile project
 │   ├── clean.sh                         # Clean build artifacts
 │   ├── shell.sh                         # Start Erlang shell
-│   └── run.sh                           # Run application
+│   ├── run.sh                           # Run application
+│   └── watch_logs.sh                    # Watch logs with color
+├── tools/
+│   └── watch_logs.py                    # Python log watcher
+├── log/
+│   └── erlport_demo.log                 # Application logs (rotated)
 └── rebar.config                         # Dependencies
 ```
 
@@ -210,11 +223,41 @@ This handles variations like:
 - "Nott'm Forest" vs "Notts Forest"
 - "Wolves" vs "Wolverhampton Wanderers"
 
+## Logging
+
+Logs are written to `log/erlport_demo.log` with automatic rotation:
+- **Max file size:** 10MB per file
+- **Rotation:** Keeps 5 rotated files
+- **Compression:** Old logs are compressed
+
+### Watching Logs
+
+```bash
+# Watch logs in real-time with colors
+./scripts/watch_logs.sh
+
+# Show all existing logs first, then follow
+./scripts/watch_logs.sh --all
+
+# Show logs without following (just dump and exit)
+./scripts/watch_logs.sh --no-follow
+```
+
+The log watcher colorizes output by log level:
+- **DEBUG** - Cyan
+- **INFO** - Green
+- **WARNING** - Yellow
+- **ERROR** - Red (bold)
+
+### Re-enabling Console Logging
+
+To see logs in the console (for debugging), edit `config/sys.config` and uncomment the console handler.
+
 ## Scheduler
 
 The centralized `scheduler.erl` manages all recurring tasks with proper process supervision. League workers register their scraping tasks on startup.
 
-To change interval, modify the `scheduler:schedule_task/4` calls in `league_worker.erl`:
+To change interval, modify the scraper timing in `config/sys.config`:
 ```erlang
 % In league_worker.erl init/1
 scheduler:schedule_task(
