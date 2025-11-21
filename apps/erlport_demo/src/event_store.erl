@@ -208,12 +208,20 @@ event_to_map(#event{
     created_at = CreatedAt,
     updated_at = UpdatedAt
 }) ->
-    #{
+    % Build base map with required fields
+    BaseMap = #{
         league => League,
         name => Name,
         date => Date,
-        bbc_score => BbcScore,
-        fishy_score => FishyScore,
         created_at => CreatedAt,
         updated_at => UpdatedAt
-    }.
+    },
+    % Add optional score fields only if they're defined
+    Map1 = case BbcScore of
+        undefined -> BaseMap;
+        _ -> maps:put(bbc_score, BbcScore, BaseMap)
+    end,
+    case FishyScore of
+        undefined -> Map1;
+        _ -> maps:put(fishy_score, FishyScore, Map1)
+    end.

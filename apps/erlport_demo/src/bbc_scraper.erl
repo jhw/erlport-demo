@@ -27,7 +27,7 @@ scrape(LeagueCode) ->
                             case python_pool:call_and_await(bbc_pool, {bbc_scraper, parse_bbc_html, [Body]}, 30000) of
                                 {ok, JsonResults} ->
                                     % Decode JSON to Erlang terms (with binary keys)
-                                    ParsedResults = thoas:decode(JsonResults),
+                                    {ok, ParsedResults} = thoas:decode(JsonResults),
                                     logger:info("BBC scraper: Parsed ~p results for ~p", [length(ParsedResults), LeagueCode]),
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
@@ -70,7 +70,7 @@ process_results(LeagueCode, Results, Teams) ->
     % Batch match all event names at once - send/receive JSON
     case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [JsonRequest]}, 30000) of
         {ok, JsonResponse} ->
-            MatchResult = thoas:decode(JsonResponse),
+            {ok, MatchResult} = thoas:decode(JsonResponse),
             Matched = maps:get(<<"matched">>, MatchResult, #{}),
             Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
 
