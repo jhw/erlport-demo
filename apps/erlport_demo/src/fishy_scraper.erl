@@ -54,7 +54,6 @@ process_results(LeagueCode, Results, Teams) ->
     TeamsData = #{LeagueCode => Teams},
 
     % Extract all event names for batch matching
-    % Python returns string keys like "name", not binary <<"name">>
     EventNames = [maps:get("name", Result) || Result <- Results],
 
     % Batch match all event names at once
