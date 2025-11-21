@@ -14,16 +14,16 @@
 %% Start a supervision subtree for one pool
 %% PoolName - registered name for the pool (e.g., bbc_pool)
 %% ScriptName - Python script name (e.g., bbc_scraper)
-%% PoolSize - number of workers (e.g., 2)
-start_link(PoolName, ScriptName, PoolSize) ->
+%% PoolConfig - map with pool_size and worker_timeout_ms
+start_link(PoolName, ScriptName, PoolConfig) ->
     SupName = list_to_atom(atom_to_list(PoolName) ++ "_sup"),
-    supervisor:start_link({local, SupName}, ?MODULE, [PoolName, ScriptName, PoolSize]).
+    supervisor:start_link({local, SupName}, ?MODULE, [PoolName, ScriptName, PoolConfig]).
 
 %%====================================================================
 %% Supervisor callbacks
 %%====================================================================
 
-init([PoolName, ScriptName, PoolSize]) ->
+init([PoolName, ScriptName, PoolConfig]) ->
     % rest_for_one: If worker_sup dies, pool dies too (loses worker refs)
     %               If pool dies, worker_sup dies too (clean slate)
     SupFlags = #{
@@ -46,7 +46,7 @@ init([PoolName, ScriptName, PoolSize]) ->
         % Pool manager - distributes work to workers
         #{
             id => pool,
-            start => {python_pool, start_link, [PoolName, ScriptName, PoolSize]},
+            start => {python_pool, start_link, [PoolName, ScriptName, PoolConfig]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2, call_python/6]).
+-export([start_link/2, call_python/7]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -20,8 +20,8 @@ start_link(ScriptName, PoolName) ->
     gen_server:start_link(?MODULE, [ScriptName, PoolName], []).
 
 %% Call Python function - result sent to CallerPid, completion notification to PoolPid
-call_python(WorkerPid, Module, Function, Args, CallerPid, PoolPid) ->
-    gen_server:cast(WorkerPid, {call_python, Module, Function, Args, CallerPid, PoolPid}).
+call_python(WorkerPid, Module, Function, Args, CallerPid, PoolPid, TimeoutMs) ->
+    gen_server:cast(WorkerPid, {call_python, Module, Function, Args, CallerPid, PoolPid, TimeoutMs}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -49,26 +49,51 @@ init([ScriptName, PoolName]) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.
 
-handle_cast({call_python, Module, Function, Args, CallerPid, PoolPid}, State) ->
+handle_cast({call_python, Module, Function, Args, CallerPid, PoolPid, TimeoutMs}, State) ->
     WorkerPid = self(),
-    % Execute in a linked process so we don't block the worker
+    % Execute in a separate process with timeout protection
+    % Since python:call/4 has no timeout parameter, we implement timeout ourselves
     spawn_link(fun() ->
-        try
-            Result = python:call(State#state.python_pid, Module, Function, Args),
-            % Send result to the original caller (scraper)
-            CallerPid ! {python_result, WorkerPid, {ok, Result}},
-            % Notify pool manager that worker is done
-            PoolPid ! {worker_done, WorkerPid, {ok, Result}}
-        catch
-            Error:Reason:Stacktrace ->
-                logger:error(
-                    "Python call failed: ~p:~p~nStacktrace: ~p",
-                    [Error, Reason, Stacktrace]
-                ),
-                % Send error to the original caller (scraper)
-                CallerPid ! {python_result, WorkerPid, {error, {Error, Reason}}},
-                % Notify pool manager that worker is done (with error)
-                PoolPid ! {worker_done, WorkerPid, {error, {Error, Reason}}}
+        % Create a unique reference for this call
+        CallRef = make_ref(),
+
+        % Spawn the actual Python call in a separate process
+        CallPid = spawn_link(fun() ->
+            try
+                Result = python:call(State#state.python_pid, Module, Function, Args),
+                WorkerPid ! {CallRef, {ok, Result}}
+            catch
+                Error:Reason:Stacktrace ->
+                    logger:error(
+                        "Python call failed: ~p:~p~nStacktrace: ~p",
+                        [Error, Reason, Stacktrace]
+                    ),
+                    WorkerPid ! {CallRef, {error, {Error, Reason}}}
+            end
+        end),
+
+        % Wait for result or timeout
+        receive
+            {CallRef, Result} ->
+                % Python call completed in time
+                case Result of
+                    {ok, Value} ->
+                        CallerPid ! {python_result, WorkerPid, {ok, Value}},
+                        PoolPid ! {worker_done, WorkerPid, {ok, Value}};
+                    {error, ErrorReason} ->
+                        CallerPid ! {python_result, WorkerPid, {error, ErrorReason}},
+                        PoolPid ! {worker_done, WorkerPid, {error, ErrorReason}}
+                end
+        after TimeoutMs ->
+            % Timeout - kill the call process
+            logger:error(
+                "Python worker ~p: Call to ~p:~p timed out after ~pms, killing call process ~p",
+                [WorkerPid, Module, Function, TimeoutMs, CallPid]
+            ),
+            exit(CallPid, kill),
+            % Send timeout error to caller and pool
+            CallerPid ! {python_result, WorkerPid, {error, worker_timeout}},
+            PoolPid ! {worker_done, WorkerPid, {error, worker_timeout}}
         end
     end),
     {noreply, State};

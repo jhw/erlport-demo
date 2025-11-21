@@ -39,6 +39,7 @@
     pool_name :: atom(),
     script_name :: atom(),
     pool_size :: integer(),
+    worker_timeout_ms :: integer(),
     worker_sup_pid :: pid(),
     request_queue :: queue:queue(),
     available_workers :: queue:queue(),
@@ -49,8 +50,8 @@
 %% API functions
 %%====================================================================
 
-start_link(PoolName, ScriptName, PoolSize) ->
-    gen_server:start_link({local, PoolName}, ?MODULE, [PoolName, ScriptName, PoolSize], []).
+start_link(PoolName, ScriptName, PoolConfig) ->
+    gen_server:start_link({local, PoolName}, ?MODULE, [PoolName, ScriptName, PoolConfig], []).
 
 %% Call Python function asynchronously - result sent as {python_result, WorkerPid, Result}
 call_python(PoolName, {Module, Function, Args}, CallerPid) ->
@@ -83,8 +84,12 @@ call_and_await(PoolName, {Module, Function, Args}, Timeout) ->
 %% gen_server callbacks
 %%====================================================================
 
-init([PoolName, ScriptName, PoolSize]) ->
+init([PoolName, ScriptName, PoolConfig]) ->
     process_flag(trap_exit, true),
+
+    % Extract configuration
+    PoolSize = maps:get(pool_size, PoolConfig, 2),
+    WorkerTimeoutMs = maps:get(worker_timeout_ms, PoolConfig, 45000),
 
     % Get worker supervisor PID (our sibling in the supervision tree)
     % We are started by python_pool_sup which started python_worker_sup first
@@ -106,13 +111,14 @@ init([PoolName, ScriptName, PoolSize]) ->
         lists:seq(1, PoolSize)
     ),
 
-    logger:info("Python pool ~p started, requested ~p workers from supervisor ~p",
-        [PoolName, PoolSize, WorkerSupPid]),
+    logger:info("Python pool ~p started, requested ~p workers from supervisor ~p (timeout: ~pms)",
+        [PoolName, PoolSize, WorkerSupPid, WorkerTimeoutMs]),
 
     {ok, #state{
         pool_name = PoolName,
         script_name = ScriptName,
         pool_size = PoolSize,
+        worker_timeout_ms = WorkerTimeoutMs,
         worker_sup_pid = WorkerSupPid,
         request_queue = queue:new(),
         available_workers = queue:new(),  % Workers will register themselves
@@ -129,7 +135,7 @@ handle_cast({call_python, Module, Function, Args, CallerPid}, State) ->
         {{value, Worker}, NewAvailable} ->
             % Worker available, assign immediately
             logger:debug("~p: Assigned to worker ~p", [State#state.pool_name, Worker]),
-            python_worker:call_python(Worker, Module, Function, Args, CallerPid, self()),
+            python_worker:call_python(Worker, Module, Function, Args, CallerPid, self(), State#state.worker_timeout_ms),
             NewBusy = sets:add_element(Worker, State#state.busy_workers),
             {noreply, State#state{
                 available_workers = NewAvailable,
@@ -168,7 +174,7 @@ handle_info({worker_done, WorkerPid, Result}, State) ->
                     % Assign queued request to this worker
                     logger:info("~p: Assigning queued request ~p:~p to worker ~p",
                         [State#state.pool_name, Module, Function, WorkerPid]),
-                    python_worker:call_python(WorkerPid, Module, Function, Args, CallerPid, self()),
+                    python_worker:call_python(WorkerPid, Module, Function, Args, CallerPid, self(), State#state.worker_timeout_ms),
                     {noreply, State#state{
                         request_queue = NewQueue,
                         busy_workers = sets:add_element(WorkerPid, NewBusy)
@@ -247,7 +253,7 @@ handle_info({worker_available, WorkerPid}, State) ->
             % Assign queued request immediately
             logger:info("~p: Worker ~p immediately assigned queued request ~p:~p",
                 [State#state.pool_name, WorkerPid, Module, Function]),
-            python_worker:call_python(WorkerPid, Module, Function, Args, CallerPid, self()),
+            python_worker:call_python(WorkerPid, Module, Function, Args, CallerPid, self(), State#state.worker_timeout_ms),
             {noreply, State#state{
                 request_queue = NewQueue,
                 busy_workers = sets:add_element(WorkerPid, State#state.busy_workers)
