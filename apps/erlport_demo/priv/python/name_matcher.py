@@ -170,32 +170,44 @@ def match_matchup(matchup_text, league_code, teams_data):
     return match_entity_matchup(matchup_text, teams)
 
 
-def match_matchups_batch(matchup_texts, league_code, teams_data):
+def match_matchups_batch(json_input):
     """
     Batch match multiple matchups at once
 
     Args:
-        matchup_texts: list[str] - List of matchup strings to match
-        league_code: str - League code like "ENG1" or "ENG2"
-        teams_data: dict - Dictionary mapping league codes to team lists
+        json_input: str - JSON string containing:
+            - matchup_texts: list[str] - List of matchup strings to match
+            - league_code: str - League code like "ENG1" or "ENG2"
+            - teams_data: dict - Dictionary mapping league codes to team lists
 
     Returns:
-        dict with keys:
+        str - JSON string with dict containing:
             - matched: dict mapping original names to canonical names
             - unmatched: list of names that couldn't be matched
     """
-    if league_code not in teams_data:
-        return {"matched": {}, "unmatched": matchup_texts}
+    try:
+        data = json.loads(json_input)
+        matchup_texts = data['matchup_texts']
+        league_code = data['league_code']
+        teams_data = data['teams_data']
 
-    teams = teams_data[league_code]
-    matched = {}
-    unmatched = []
+        if league_code not in teams_data:
+            result = {"matched": {}, "unmatched": matchup_texts}
+            return json.dumps(result)
 
-    for matchup_text in matchup_texts:
-        canonical = match_entity_matchup(matchup_text, teams)
-        if canonical:
-            matched[matchup_text] = canonical
-        else:
-            unmatched.append(matchup_text)
+        teams = teams_data[league_code]
+        matched = {}
+        unmatched = []
 
-    return {"matched": matched, "unmatched": unmatched}
+        for matchup_text in matchup_texts:
+            canonical = match_entity_matchup(matchup_text, teams)
+            if canonical:
+                matched[matchup_text] = canonical
+            else:
+                unmatched.append(matchup_text)
+
+        result = {"matched": matched, "unmatched": unmatched}
+        return json.dumps(result)
+    except Exception as e:
+        print(f"Error in match_matchups_batch: {e}")
+        return json.dumps({"matched": {}, "unmatched": []})

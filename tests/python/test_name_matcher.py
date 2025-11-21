@@ -4,11 +4,12 @@
 import os
 import sys
 import unittest
+import json
 
 # Add priv/python to path so we can import the matcher
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
-priv_python = os.path.join(project_root, 'priv', 'python')
+priv_python = os.path.join(project_root, 'apps', 'erlport_demo', 'priv', 'python')
 sys.path.insert(0, priv_python)
 
 from name_matcher import match_entity, match_matchups_batch
@@ -63,7 +64,25 @@ class TestNameMatcher(unittest.TestCase):
             "Man City vs Spurs"
         ]
 
-        result = match_matchups_batch(matchups, "ENG1", self.teams_data)
+        json_input = json.dumps({
+
+
+            "matchup_texts": matchups,
+
+
+            "league_code": "ENG1",
+
+
+            "teams_data": self.teams_data
+
+
+        })
+
+
+        json_result = match_matchups_batch(json_input)
+
+
+        result = json.loads(json_result)
 
         self.assertIn("matched", result)
         self.assertIn("unmatched", result)
@@ -88,7 +107,25 @@ class TestNameMatcher(unittest.TestCase):
             "Chelsea vs Arsenal"
         ]
 
-        result = match_matchups_batch(matchups, "ENG1", self.teams_data)
+        json_input = json.dumps({
+
+
+            "matchup_texts": matchups,
+
+
+            "league_code": "ENG1",
+
+
+            "teams_data": self.teams_data
+
+
+        })
+
+
+        json_result = match_matchups_batch(json_input)
+
+
+        result = json.loads(json_result)
 
         self.assertEqual(len(result["matched"]), 2)
         self.assertEqual(len(result["unmatched"]), 1)
@@ -101,14 +138,44 @@ class TestNameMatcher(unittest.TestCase):
             "Another vs NoMatch"
         ]
 
-        result = match_matchups_batch(matchups, "ENG1", self.teams_data)
+        json_input = json.dumps({
+
+
+            "matchup_texts": matchups,
+
+
+            "league_code": "ENG1",
+
+
+            "teams_data": self.teams_data
+
+
+        })
+
+
+        json_result = match_matchups_batch(json_input)
+
+
+        result = json.loads(json_result)
 
         self.assertEqual(len(result["matched"]), 0)
         self.assertEqual(len(result["unmatched"]), 2)
 
     def test_match_matchups_batch_empty(self):
         """Test batch matching with empty list"""
-        result = match_matchups_batch([], "ENG1", self.teams_data)
+        json_input = json.dumps({
+
+            "matchup_texts": [],
+
+            "league_code": "ENG1",
+
+            "teams_data": self.teams_data
+
+        })
+
+        json_result = match_matchups_batch(json_input)
+
+        result = json.loads(json_result)
 
         self.assertEqual(len(result["matched"]), 0)
         self.assertEqual(len(result["unmatched"]), 0)
@@ -121,7 +188,25 @@ class TestNameMatcher(unittest.TestCase):
             "Man City vs. Spurs"
         ]
 
-        result = match_matchups_batch(matchups, "ENG1", self.teams_data)
+        json_input = json.dumps({
+
+
+            "matchup_texts": matchups,
+
+
+            "league_code": "ENG1",
+
+
+            "teams_data": self.teams_data
+
+
+        })
+
+
+        json_result = match_matchups_batch(json_input)
+
+
+        result = json.loads(json_result)
 
         # Should handle different separators
         self.assertGreater(len(result["matched"]), 0)
@@ -130,7 +215,25 @@ class TestNameMatcher(unittest.TestCase):
         """Test batch matching with invalid league"""
         matchups = ["Man Utd vs Liverpool"]
 
-        result = match_matchups_batch(matchups, "INVALID_LEAGUE", self.teams_data)
+        json_input = json.dumps({
+
+
+            "matchup_texts": matchups,
+
+
+            "league_code": "INVALID_LEAGUE",
+
+
+            "teams_data": self.teams_data
+
+
+        })
+
+
+        json_result = match_matchups_batch(json_input)
+
+
+        result = json.loads(json_result)
 
         # Should return all unmatched since league doesn't exist
         self.assertEqual(len(result["matched"]), 0)

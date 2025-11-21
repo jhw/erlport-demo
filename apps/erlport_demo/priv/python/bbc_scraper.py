@@ -123,10 +123,11 @@ def parse_bbc_html(html_content):
         html_content: str - HTML content from BBC Sport page
 
     Returns:
-        list - List of result dicts or empty list on error
+        str - JSON string with list of result dicts or empty list on error
     """
     try:
-        return parse_bbc_results(html_content)
+        results = parse_bbc_results(html_content)
+        return json.dumps(results)
     except Exception as e:
         print(f"Error parsing BBC HTML: {e}")
-        return []
+        return json.dumps([])

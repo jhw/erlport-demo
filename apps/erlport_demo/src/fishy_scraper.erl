@@ -23,9 +23,11 @@ scrape(LeagueCode) ->
                     case http_client:fetch_url(Url) of
                         {ok, 200, Body} ->
                             logger:info("Fishy scraper: Parsing HTML for ~p", [LeagueCode]),
-                            % Parse with Python
+                            % Parse with Python - returns JSON string
                             case python_pool:call_and_await(fishy_pool, {fishy_scraper, parse_fishy_html, [Body]}, 30000) of
-                                {ok, ParsedResults} ->
+                                {ok, JsonResults} ->
+                                    % Decode JSON to Erlang terms (with binary keys)
+                                    ParsedResults = thoas:decode(JsonResults),
                                     logger:info("Fishy scraper: Parsed ~p results for ~p", [length(ParsedResults), LeagueCode]),
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
@@ -51,16 +53,23 @@ build_url(FishyId) ->
     io_lib:format("https://thefishy.co.uk/football-results.php?table=~B", [FishyId]).
 
 process_results(LeagueCode, Results, Teams) ->
-    TeamsData = #{LeagueCode => Teams},
+    % Extract all event names for batch matching (now with binary keys from thoas)
+    EventNames = [maps:get(<<"name">>, Result) || Result <- Results],
 
-    % Extract all event names for batch matching
-    EventNames = [maps:get("name", Result) || Result <- Results],
+    % Prepare request data for Python name matcher - encode as JSON
+    RequestData = #{
+        <<"matchup_texts">> => EventNames,
+        <<"league_code">> => LeagueCode,
+        <<"teams_data">> => #{LeagueCode => Teams}
+    },
+    JsonRequest = thoas:encode(RequestData),
 
-    % Batch match all event names at once
-    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [EventNames, LeagueCode, TeamsData]}, 30000) of
-        {ok, MatchResult} ->
-            Matched = maps:get("matched", MatchResult, #{}),
-            Unmatched = maps:get("unmatched", MatchResult, []),
+    % Batch match all event names at once - send/receive JSON
+    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [JsonRequest]}, 30000) of
+        {ok, JsonResponse} ->
+            MatchResult = thoas:decode(JsonResponse),
+            Matched = maps:get(<<"matched">>, MatchResult, #{}),
+            Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
 
             % Log unmatched events
             lists:foreach(fun(UnmatchedName) ->
@@ -72,15 +81,15 @@ process_results(LeagueCode, Results, Teams) ->
             logger:info("Fishy scraper: Matched ~p/~p events for ~p", [MatchedCount, length(Results), LeagueCode]),
 
             lists:foreach(fun(Result) ->
-                Name = maps:get("name", Result),
+                Name = maps:get(<<"name">>, Result),
                 case maps:get(Name, Matched, undefined) of
                     undefined ->
                         % Event was unmatched, skip it
                         ok;
                     CanonicalName ->
-                        % Event matched, store it
-                        Date = maps:get("date", Result),
-                        Score = maps:get("score", Result),
+                        % Event matched, store it (all binaries now)
+                        Date = maps:get(<<"date">>, Result),
+                        Score = maps:get(<<"score">>, Result),
                         gen_server:cast(event_store, {store_event, LeagueCode, CanonicalName, Date, fishy, Score}),
                         logger:info("Fishy scraper: Stored event ~p: ~p ~p ~p", [LeagueCode, CanonicalName, Date, Score])
                 end

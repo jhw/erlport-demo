@@ -6,6 +6,7 @@ Fetches match results from thefishy.co.uk
 
 from lxml import html as lxml_html
 from datetime import datetime
+import json
 
 
 def clean_text(text):
@@ -131,10 +132,11 @@ def parse_fishy_html(html_content):
         html_content: str - HTML content from The Fishy page
 
     Returns:
-        list - List of result dicts or empty list on error
+        str - JSON string with list of result dicts or empty list on error
     """
     try:
-        return parse_fishy_results(html_content)
+        results = parse_fishy_results(html_content)
+        return json.dumps(results)
     except Exception as e:
         print(f"Error parsing Fishy HTML: {e}")
-        return []
+        return json.dumps([])

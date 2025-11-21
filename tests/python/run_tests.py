@@ -11,7 +11,7 @@ import os
 # Add priv/python to path so tests can import modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
-priv_python = os.path.join(project_root, 'priv', 'python')
+priv_python = os.path.join(project_root, 'apps', 'erlport_demo', 'priv', 'python')
 sys.path.insert(0, priv_python)
 
 
