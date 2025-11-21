@@ -15,7 +15,12 @@ fetch_url(Url, Timeout) ->
     {ok, {Scheme, _, Host, Port, Path, Query}} = parse_url(Url),
 
     ConnectOpts = case Scheme of
-        "https" -> #{transport => tls};
+        "https" -> #{
+            transport => tls,
+            tls_opts => [
+                {verify, verify_none}  % Disable SSL verification for demo
+            ]
+        };
         "http" -> #{}
     end,
 
