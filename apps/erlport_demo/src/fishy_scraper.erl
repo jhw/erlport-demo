@@ -54,13 +54,14 @@ process_results(LeagueCode, Results, Teams) ->
     TeamsData = #{LeagueCode => Teams},
 
     % Extract all event names for batch matching
-    EventNames = [maps:get(<<"name">>, Result) || Result <- Results],
+    % Python returns string keys like "name", not binary <<"name">>
+    EventNames = [maps:get("name", Result) || Result <- Results],
 
     % Batch match all event names at once
     case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [EventNames, LeagueCode, TeamsData]}, 30000) of
         {ok, MatchResult} ->
-            Matched = maps:get(<<"matched">>, MatchResult, #{}),
-            Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
+            Matched = maps:get("matched", MatchResult, #{}),
+            Unmatched = maps:get("unmatched", MatchResult, []),
 
             % Log unmatched events
             lists:foreach(fun(UnmatchedName) ->
@@ -72,15 +73,15 @@ process_results(LeagueCode, Results, Teams) ->
             logger:info("Fishy scraper: Matched ~p/~p events for ~p", [MatchedCount, length(Results), LeagueCode]),
 
             lists:foreach(fun(Result) ->
-                Name = maps:get(<<"name">>, Result),
+                Name = maps:get("name", Result),
                 case maps:get(Name, Matched, undefined) of
                     undefined ->
                         % Event was unmatched, skip it
                         ok;
                     CanonicalName ->
                         % Event matched, store it
-                        Date = maps:get(<<"date">>, Result),
-                        Score = maps:get(<<"score">>, Result),
+                        Date = maps:get("date", Result),
+                        Score = maps:get("score", Result),
                         gen_server:cast(event_store, {store_event, LeagueCode, CanonicalName, Date, fishy, Score}),
                         logger:info("Fishy scraper: Stored event ~p: ~p ~p ~p", [LeagueCode, CanonicalName, Date, Score])
                 end

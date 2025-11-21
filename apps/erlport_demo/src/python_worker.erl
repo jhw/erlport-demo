@@ -56,21 +56,22 @@ handle_cast({call_python, Module, Function, Args, CallerPid, PoolPid, TimeoutMs}
     spawn_link(fun() ->
         % Create a unique reference for this call
         CallRef = make_ref(),
+        OuterPid = self(),  % CRITICAL: Capture the outer spawned process PID
 
         % Spawn the actual Python call in a separate process
         CallPid = spawn_link(fun() ->
             logger:info("Python worker ~p: Starting python:call for ~p:~p", [WorkerPid, Module, Function]),
             try
                 Result = python:call(State#state.python_pid, Module, Function, Args),
-                logger:info("Python worker ~p: python:call completed, sending to worker", [WorkerPid]),
-                WorkerPid ! {CallRef, {ok, Result}}
+                logger:info("Python worker ~p: python:call completed, sending to outer process ~p", [WorkerPid, OuterPid]),
+                OuterPid ! {CallRef, {ok, Result}}  % Send to outer process, not gen_server!
             catch
                 Error:Reason:Stacktrace ->
                     logger:error(
                         "Python call failed: ~p:~p~nStacktrace: ~p",
                         [Error, Reason, Stacktrace]
                     ),
-                    WorkerPid ! {CallRef, {error, {Error, Reason}}}
+                    OuterPid ! {CallRef, {error, {Error, Reason}}}  % Send to outer process, not gen_server!
             end
         end),
         logger:info("Python worker ~p: Spawned call process ~p", [WorkerPid, CallPid]),
