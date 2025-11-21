@@ -56,28 +56,40 @@ build_url(BbcName) ->
 process_results(LeagueCode, Results, Teams) ->
     TeamsData = #{LeagueCode => Teams},
 
-    % Spawn a linked process for each result to handle matching concurrently
-    % This allows all matches to happen in parallel using both matcher workers
-    lists:foreach(fun(Result) ->
-        spawn_link(fun() ->
-            match_and_store_result(Result, LeagueCode, TeamsData)
-        end)
-    end, Results).
+    % Extract all event names for batch matching
+    EventNames = [maps:get(<<"name">>, Result) || Result <- Results],
 
-match_and_store_result(Result, LeagueCode, TeamsData) ->
-    Name = maps:get(<<"name">>, Result),
-    Date = maps:get(<<"date">>, Result),
-    Score = maps:get(<<"score">>, Result),
+    % Batch match all event names at once
+    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [EventNames, LeagueCode, TeamsData]}, 30000) of
+        {ok, MatchResult} ->
+            Matched = maps:get(<<"matched">>, MatchResult, #{}),
+            Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
 
-    % Call matcher pool
-    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchup, [Name, LeagueCode, TeamsData]}, 10000) of
-        {ok, MatchedName} when MatchedName =/= none, MatchedName =/= undefined ->
-            gen_server:cast(event_store, {store_event, LeagueCode, MatchedName, Date, bbc, Score}),
-            logger:info("BBC scraper: Stored event ~p: ~p ~p ~p", [LeagueCode, MatchedName, Date, Score]);
-        {ok, _} ->
-            logger:warning("BBC scraper: Could not match event: ~p", [Name]);
+            % Log unmatched events
+            lists:foreach(fun(UnmatchedName) ->
+                logger:warning("BBC scraper: Could not match event: ~p", [UnmatchedName])
+            end, Unmatched),
+
+            % Filter and store only matched results
+            MatchedCount = maps:size(Matched),
+            logger:info("BBC scraper: Matched ~p/~p events for ~p", [MatchedCount, length(Results), LeagueCode]),
+
+            lists:foreach(fun(Result) ->
+                Name = maps:get(<<"name">>, Result),
+                case maps:get(Name, Matched, undefined) of
+                    undefined ->
+                        % Event was unmatched, skip it
+                        ok;
+                    CanonicalName ->
+                        % Event matched, store it
+                        Date = maps:get(<<"date">>, Result),
+                        Score = maps:get(<<"score">>, Result),
+                        gen_server:cast(event_store, {store_event, LeagueCode, CanonicalName, Date, bbc, Score}),
+                        logger:info("BBC scraper: Stored event ~p: ~p ~p ~p", [LeagueCode, CanonicalName, Date, Score])
+                end
+            end, Results);
         {error, timeout} ->
-            logger:warning("BBC scraper: Match timeout for event: ~p", [Name]);
+            logger:error("BBC scraper: Batch match timeout for ~p", [LeagueCode]);
         {error, Error} ->
-            logger:error("BBC scraper: Match error for ~p: ~p", [Name, Error])
+            logger:error("BBC scraper: Batch match error for ~p: ~p", [LeagueCode, Error])
     end.

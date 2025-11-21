@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, schedule_task/4, cancel_task/1]).
+-export([start_link/1, schedule_task/4, cancel_task/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -15,15 +15,16 @@
 }).
 
 -record(state, {
-    tasks :: #{term() => #task{}}
+    tasks :: #{term() => #task{}},
+    scraper_config :: map()
 }).
 
 %%====================================================================
 %% API functions
 %%====================================================================
 
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link(ScraperConfig) ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [ScraperConfig], []).
 
 %% Schedule a recurring task
 %% Id: unique identifier for this task
@@ -41,35 +42,58 @@ cancel_task(Id) ->
 %% gen_server callbacks
 %%====================================================================
 
-init([]) ->
-    logger:info("Scheduler started"),
+init([ScraperConfigs]) ->
+    logger:info("Scheduler started with config: ~p", [ScraperConfigs]),
 
     % Load all leagues and schedule their scraper tasks
     % This replaces the league_worker layer - scheduler owns all tasks directly
     {ok, Leagues} = config_service:get_all_leagues(),
-    lists:foreach(fun schedule_league_tasks/1, Leagues),
+    lists:foreach(
+        fun(League) -> schedule_league_tasks(League, ScraperConfigs) end,
+        Leagues
+    ),
 
     logger:info("Scheduler initialized with tasks for ~p leagues", [length(Leagues)]),
-    {ok, #state{tasks = #{}}}.
+    {ok, #state{tasks = #{}, scraper_config = ScraperConfigs}}.
 
 %% Internal function to schedule scraper tasks for a league
-schedule_league_tasks(League) ->
+schedule_league_tasks(League, ScraperConfigs) ->
     LeagueCode = maps:get(<<"code">>, League),
+
+    % Helper to get scraper timing config
+    GetScraperConfig = fun(ScraperName) ->
+        case lists:keyfind(ScraperName, 1, ScraperConfigs) of
+            {ScraperName, Config} -> Config;
+            false -> #{initial_delay_ms => 1000, interval_ms => 60000}  % Defaults
+        end
+    end,
 
     % Schedule BBC scraper if league has bbcName
     case maps:get(<<"bbcName">>, League, undefined) of
         undefined -> ok;
         _ ->
+            BbcConfig = GetScraperConfig(bbc_scraper),
             BbcTaskId = {bbc_scraper, LeagueCode},
-            schedule_task(BbcTaskId, 60000, {bbc_scraper, scrape, [LeagueCode]}, 1000)
+            schedule_task(
+                BbcTaskId,
+                maps:get(interval_ms, BbcConfig),
+                {bbc_scraper, scrape, [LeagueCode]},
+                maps:get(initial_delay_ms, BbcConfig)
+            )
     end,
 
     % Schedule Fishy scraper if league has thefishyId
     case maps:get(<<"thefishyId">>, League, undefined) of
         undefined -> ok;
         _ ->
+            FishyConfig = GetScraperConfig(fishy_scraper),
             FishyTaskId = {fishy_scraper, LeagueCode},
-            schedule_task(FishyTaskId, 60000, {fishy_scraper, scrape, [LeagueCode]}, 1000)
+            schedule_task(
+                FishyTaskId,
+                maps:get(interval_ms, FishyConfig),
+                {fishy_scraper, scrape, [LeagueCode]},
+                maps:get(initial_delay_ms, FishyConfig)
+            )
     end.
 
 handle_call({schedule_task, Id, IntervalMs, MFA, InitialDelayMs}, _From, State) ->

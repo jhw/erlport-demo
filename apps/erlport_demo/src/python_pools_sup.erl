@@ -25,13 +25,24 @@ init([]) ->
         period => 10
     },
 
+    % Load pool configuration from sys.config
+    {ok, PoolConfigs} = application:get_env(erlport_demo, python_pools),
+
+    % Helper to get pool size from config
+    GetPoolSize = fun(PoolName) ->
+        case lists:keyfind(PoolName, 1, PoolConfigs) of
+            {PoolName, Config} -> maps:get(pool_size, Config);
+            false -> 2  % Default fallback
+        end
+    end,
+
     % Each child is a supervision subtree: worker_sup + pool
     % Proper OTP pattern: supervisors manage workers, pools distribute work
     Children = [
         % BBC pool subtree (worker supervisor + pool manager)
         #{
             id => bbc_pool_sup,
-            start => {python_pool_sup, start_link, [bbc_pool, bbc_scraper, 2]},
+            start => {python_pool_sup, start_link, [bbc_pool, bbc_scraper, GetPoolSize(bbc_pool)]},
             restart => permanent,
             shutdown => infinity,  % Supervisor
             type => supervisor,
@@ -40,7 +51,7 @@ init([]) ->
         % Fishy pool subtree
         #{
             id => fishy_pool_sup,
-            start => {python_pool_sup, start_link, [fishy_pool, fishy_scraper, 2]},
+            start => {python_pool_sup, start_link, [fishy_pool, fishy_scraper, GetPoolSize(fishy_pool)]},
             restart => permanent,
             shutdown => infinity,  % Supervisor
             type => supervisor,
@@ -49,7 +60,7 @@ init([]) ->
         % Matcher pool subtree
         #{
             id => matcher_pool_sup,
-            start => {python_pool_sup, start_link, [matcher_pool, name_matcher, 2]},
+            start => {python_pool_sup, start_link, [matcher_pool, name_matcher, GetPoolSize(matcher_pool)]},
             restart => permanent,
             shutdown => infinity,  % Supervisor
             type => supervisor,

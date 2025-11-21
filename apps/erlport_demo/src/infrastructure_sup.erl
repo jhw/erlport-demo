@@ -25,6 +25,9 @@ init([]) ->
         period => 10
     },
 
+    % Load scraper timing configuration from sys.config
+    {ok, ScraperConfigs} = application:get_env(erlport_demo, scrapers),
+
     Children = [
         % Config service - must start first (loads data for everyone)
         #{
@@ -44,10 +47,10 @@ init([]) ->
             type => worker,
             modules => [event_store]
         },
-        % Centralized scheduler
+        % Centralized scheduler - receives per-scraper timing configuration
         #{
             id => scheduler,
-            start => {scheduler, start_link, []},
+            start => {scheduler, start_link, [ScraperConfigs]},
             restart => permanent,
             shutdown => 5000,
             type => worker,

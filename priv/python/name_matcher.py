@@ -168,3 +168,34 @@ def match_matchup(matchup_text, league_code, teams_data):
 
     teams = teams_data[league_code]
     return match_entity_matchup(matchup_text, teams)
+
+
+def match_matchups_batch(matchup_texts, league_code, teams_data):
+    """
+    Batch match multiple matchups at once
+
+    Args:
+        matchup_texts: list[str] - List of matchup strings to match
+        league_code: str - League code like "ENG1" or "ENG2"
+        teams_data: dict - Dictionary mapping league codes to team lists
+
+    Returns:
+        dict with keys:
+            - matched: dict mapping original names to canonical names
+            - unmatched: list of names that couldn't be matched
+    """
+    if league_code not in teams_data:
+        return {"matched": {}, "unmatched": matchup_texts}
+
+    teams = teams_data[league_code]
+    matched = {}
+    unmatched = []
+
+    for matchup_text in matchup_texts:
+        canonical = match_entity_matchup(matchup_text, teams)
+        if canonical:
+            matched[matchup_text] = canonical
+        else:
+            unmatched.append(matchup_text)
+
+    return {"matched": matched, "unmatched": unmatched}
