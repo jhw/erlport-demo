@@ -40,7 +40,10 @@ init([]) ->
     LeaguesFile = filename:join([PrivDir, "data", "leagues", "leagues.json"]),
     Leagues = case file:read_file(LeaguesFile) of
         {ok, LeaguesJson} ->
-            thoas:decode(LeaguesJson);
+            case thoas:decode(LeaguesJson) of
+                {ok, Data} -> Data;
+                {error, _} -> []
+            end;
         {error, Reason} ->
             logger:error("Failed to load leagues.json: ~p", [Reason]),
             []
@@ -52,8 +55,13 @@ init([]) ->
         TeamsFile = filename:join([PrivDir, "data", "teams", <<LeagueCode/binary, ".json">>]),
         case file:read_file(TeamsFile) of
             {ok, TeamsJson} ->
-                TeamsList = thoas:decode(TeamsJson),
-                maps:put(LeagueCode, TeamsList, Acc);
+                case thoas:decode(TeamsJson) of
+                    {ok, TeamsList} ->
+                        maps:put(LeagueCode, TeamsList, Acc);
+                    {error, _} ->
+                        logger:warning("Failed to decode teams JSON for ~p", [LeagueCode]),
+                        Acc
+                end;
             {error, TeamsReason} ->
                 logger:warning("Failed to load teams for ~p: ~p", [LeagueCode, TeamsReason]),
                 Acc
