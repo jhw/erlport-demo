@@ -23,11 +23,12 @@ scrape(LeagueCode) ->
                     case http_client:fetch_url(Url) of
                         {ok, 200, Body} ->
                             logger:info("Fishy scraper: Parsing HTML for ~p", [LeagueCode]),
-                            % Parse with Python - returns JSON string
-                            case python_pool:call_and_await(fishy_pool, {fishy_scraper, parse_fishy_html, [Body]}, 30000) of
-                                {ok, JsonResults} ->
-                                    % Decode JSON to Erlang terms (with binary keys)
-                                    {ok, ParsedResults} = thoas:decode(JsonResults),
+                            % Wrap HTML in JSON object for ErlCracker transport
+                            JsonInput = #{<<"html">> => Body},
+                            % Parse with Python via ErlCracker
+                            % ErlCracker automatically decodes JSON, so we get Erlang terms directly
+                            case erlcracker:call(fishy_pool, fishy_scraper, parse_fishy_html, [JsonInput], 30000) of
+                                {ok, ParsedResults} ->
                                     logger:info("Fishy scraper: Parsed ~p results for ~p", [length(ParsedResults), LeagueCode]),
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
@@ -56,18 +57,18 @@ process_results(LeagueCode, Results, Teams) ->
     % Extract all event names for batch matching (now with binary keys from thoas)
     EventNames = [maps:get(<<"name">>, Result) || Result <- Results],
 
-    % Prepare request data for Python name matcher - encode as JSON
+    % Prepare request data for Python name matcher
+    % ErlCracker automatically handles JSON encoding/decoding
     RequestData = #{
         <<"matchup_texts">> => EventNames,
         <<"league_code">> => LeagueCode,
         <<"teams_data">> => #{LeagueCode => Teams}
     },
-    JsonRequest = thoas:encode(RequestData),
 
-    % Batch match all event names at once - send/receive JSON
-    case python_pool:call_and_await(matcher_pool, {name_matcher, match_matchups_batch, [JsonRequest]}, 30000) of
-        {ok, JsonResponse} ->
-            {ok, MatchResult} = thoas:decode(JsonResponse),
+    % Batch match all event names at once via ErlCracker
+    % ErlCracker automatically decodes JSON response
+    case erlcracker:call(matcher_pool, name_matcher, match_matchups_batch, [RequestData], 30000) of
+        {ok, MatchResult} ->
             Matched = maps:get(<<"matched">>, MatchResult, #{}),
             Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
 

@@ -56,14 +56,14 @@ init([]) ->
             type => worker,
             modules => [scheduler]
         },
-        % Python pools supervisor
+        % ErlCracker pools supervisor
         #{
-            id => python_pools_sup,
-            start => {python_pools_sup, start_link, []},
+            id => erlcracker_pools_sup,
+            start => {erlcracker_pools_sup, start_link, []},
             restart => permanent,
             shutdown => infinity,
             type => supervisor,
-            modules => [python_pools_sup]
+            modules => [erlcracker_pools_sup]
         }
     ],
 
