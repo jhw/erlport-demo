@@ -31,19 +31,22 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_parse_returns_list(self):
         """Test that parser returns a JSON string"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
         self.assertIsInstance(results, list)
 
     def test_parse_finds_matches(self):
         """Test that parser finds expected number of matches"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
         self.assertEqual(len(results), 15, f"Expected 15 matches, found {len(results)}")
 
     def test_result_structure(self):
         """Test that each result has required fields"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
         self.assertGreater(len(results), 0, "No results found to test structure")
 
@@ -54,7 +57,8 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_result_format(self):
         """Test that results have correct format"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
 
         for result in results:
@@ -69,7 +73,8 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_known_matches(self):
         """Test that specific known matches are found"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
 
         # Look for specific known matches
@@ -82,7 +87,8 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_removes_duplicates(self):
         """Test that duplicate results are removed"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
 
         # Create set of (name, score) tuples
@@ -94,7 +100,8 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_results_sorted(self):
         """Test that results are sorted by date and name"""
-        json_result = parse_fishy_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
 
         # Check dates are in order
@@ -103,14 +110,16 @@ class TestFishyScraper(unittest.TestCase):
 
     def test_empty_html_returns_empty_list(self):
         """Test that empty HTML returns empty list"""
-        json_result = parse_fishy_html("")
+        json_input = json.dumps({"html": ""})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 0)
 
     def test_invalid_html_returns_empty_list(self):
         """Test that invalid HTML returns empty list without crashing"""
-        json_result = parse_fishy_html("<html><body>No data here</body></html>")
+        json_input = json.dumps({"html": "<html><body>No data here</body></html>"})
+        json_result = parse_fishy_html(json_input)
         results = json.loads(json_result)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 0)

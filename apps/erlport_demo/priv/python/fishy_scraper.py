@@ -124,17 +124,26 @@ def parse_fishy_results(html_content):
     return filter_results(html_content)
 
 
-def parse_fishy_html(html_content):
+def parse_fishy_html(json_input):
     """
-    Main entry point for parsing Fishy HTML from Erlang
+    Main entry point for parsing Fishy HTML from Erlang via ErlCracker
+
+    ErlCracker requires JSON transport, so HTML is wrapped in a JSON object.
 
     Args:
-        html_content: str - HTML content from The Fishy page
+        json_input: str - JSON string with {"html": "<html content>"}
 
     Returns:
         str - JSON string with list of result dicts or empty list on error
     """
     try:
+        # Unwrap HTML from JSON envelope
+        data = json.loads(json_input)
+        html_content = data.get('html', '')
+
+        if not html_content:
+            return json.dumps([])
+
         results = parse_fishy_results(html_content)
         return json.dumps(results)
     except Exception as e:

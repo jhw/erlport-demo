@@ -31,7 +31,9 @@ class TestBBCScraper(unittest.TestCase):
 
     def test_parse_returns_json_string(self):
         """Test that parser returns a JSON string"""
-        json_result = parse_bbc_html(self.html_content)
+        # Wrap HTML in JSON as ErlCracker requires
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_bbc_html(json_input)
         self.assertIsInstance(json_result, str)
         # Should be valid JSON
         results = json.loads(json_result)
@@ -39,13 +41,15 @@ class TestBBCScraper(unittest.TestCase):
 
     def test_parse_finds_matches(self):
         """Test that parser finds expected number of matches"""
-        json_result = parse_bbc_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
         self.assertEqual(len(results), 20, f"Expected 20 matches, found {len(results)}")
 
     def test_result_structure(self):
         """Test that each result has required fields"""
-        json_result = parse_bbc_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
         self.assertGreater(len(results), 0, "No results found to test structure")
 
@@ -56,7 +60,8 @@ class TestBBCScraper(unittest.TestCase):
 
     def test_result_format(self):
         """Test that results have correct format"""
-        json_result = parse_bbc_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
 
         for result in results:
@@ -71,7 +76,8 @@ class TestBBCScraper(unittest.TestCase):
 
     def test_known_matches(self):
         """Test that specific known matches are found"""
-        json_result = parse_bbc_html(self.html_content)
+        json_input = json.dumps({"html": self.html_content})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
 
         # Look for specific known matches
@@ -84,14 +90,16 @@ class TestBBCScraper(unittest.TestCase):
 
     def test_empty_html_returns_empty_list(self):
         """Test that empty HTML returns empty JSON list"""
-        json_result = parse_bbc_html("")
+        json_input = json.dumps({"html": ""})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 0)
 
     def test_invalid_html_returns_empty_list(self):
         """Test that invalid HTML returns empty JSON list without crashing"""
-        json_result = parse_bbc_html("<html><body>No data here</body></html>")
+        json_input = json.dumps({"html": "<html><body>No data here</body></html>"})
+        json_result = parse_bbc_html(json_input)
         results = json.loads(json_result)
         self.assertIsInstance(results, list)
         self.assertEqual(len(results), 0)
