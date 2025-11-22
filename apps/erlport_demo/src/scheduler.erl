@@ -50,11 +50,13 @@ init([ScraperConfigs]) ->
     {ok, Leagues} = config_service:get_all_leagues(),
 
     % Build initial task state directly (can't call gen_server:call during init)
-    InitialTasks = lists:foldl(
-        fun(League, TasksAcc) ->
-            schedule_league_tasks_init(League, ScraperConfigs, TasksAcc)
+    % Use foldl with index to track league position for staggering
+    {InitialTasks, _} = lists:foldl(
+        fun(League, {TasksAcc, LeagueIndex}) ->
+            UpdatedTasks = schedule_league_tasks_init(League, ScraperConfigs, LeagueIndex, TasksAcc),
+            {UpdatedTasks, LeagueIndex + 1}
         end,
-        #{},
+        {#{}, 0},
         Leagues
     ),
 
@@ -63,15 +65,25 @@ init([ScraperConfigs]) ->
 
 %% Internal function to schedule scraper tasks for a league during init
 %% Builds tasks directly without calling gen_server:call
-schedule_league_tasks_init(League, ScraperConfigs, TasksAcc) ->
+%% LeagueIndex: 0-based index used to calculate stagger offset
+schedule_league_tasks_init(League, ScraperConfigs, LeagueIndex, TasksAcc) ->
     LeagueCode = maps:get(<<"code">>, League),
 
     % Helper to get scraper timing config
     GetScraperConfig = fun(ScraperName) ->
         case lists:keyfind(ScraperName, 1, ScraperConfigs) of
             {ScraperName, Config} -> Config;
-            false -> #{initial_delay_ms => 1000, interval_ms => 60000}  % Defaults
+            false -> #{initial_delay_ms => 1000, interval_ms => 60000, league_stagger_ms => 0}  % Defaults
         end
+    end,
+
+    % Helper to calculate staggered delay for a league
+    % First league (index 0) uses initial_delay_ms
+    % Subsequent leagues add (index * league_stagger_ms)
+    CalculateStaggeredDelay = fun(Config) ->
+        InitialDelay = maps:get(initial_delay_ms, Config),
+        StaggerMs = maps:get(league_stagger_ms, Config, 0),
+        InitialDelay + (LeagueIndex * StaggerMs)
     end,
 
     % Helper to create task directly
@@ -83,7 +95,8 @@ schedule_league_tasks_init(League, ScraperConfigs, TasksAcc) ->
             mfa = MFA,
             timer_ref = TimerRef
         },
-        logger:info("Scheduled task ~p to run every ~p ms", [TaskId, IntervalMs]),
+        logger:info("Scheduled task ~p to run in ~p ms, then every ~p ms",
+                    [TaskId, InitialDelayMs, IntervalMs]),
         maps:put(TaskId, Task, Acc)
     end,
 
@@ -93,11 +106,12 @@ schedule_league_tasks_init(League, ScraperConfigs, TasksAcc) ->
         _ ->
             BbcConfig = GetScraperConfig(bbc_scraper),
             BbcTaskId = {bbc_scraper, LeagueCode},
+            BbcStaggeredDelay = CalculateStaggeredDelay(BbcConfig),
             CreateTask(
                 BbcTaskId,
                 maps:get(interval_ms, BbcConfig),
                 {bbc_scraper, scrape, [LeagueCode]},
-                maps:get(initial_delay_ms, BbcConfig),
+                BbcStaggeredDelay,
                 TasksAcc
             )
     end,
@@ -108,11 +122,12 @@ schedule_league_tasks_init(League, ScraperConfigs, TasksAcc) ->
         _ ->
             FishyConfig = GetScraperConfig(fishy_scraper),
             FishyTaskId = {fishy_scraper, LeagueCode},
+            FishyStaggeredDelay = CalculateStaggeredDelay(FishyConfig),
             CreateTask(
                 FishyTaskId,
                 maps:get(interval_ms, FishyConfig),
                 {fishy_scraper, scrape, [LeagueCode]},
-                maps:get(initial_delay_ms, FishyConfig),
+                FishyStaggeredDelay,
                 TasksAcc1
             )
     end.
