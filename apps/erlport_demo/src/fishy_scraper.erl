@@ -25,11 +25,10 @@ scrape(LeagueCode) ->
                             logger:info("Fishy scraper: Parsing HTML for ~p", [LeagueCode]),
                             % Wrap HTML in JSON object for ErlCracker transport
                             JsonInput = #{<<"html">> => Body},
-                            % Parse with Python via ErlCracker - returns JSON string
+                            % Parse with Python via ErlCracker
+                            % ErlCracker automatically decodes JSON, so we get Erlang terms directly
                             case erlcracker:call(fishy_pool, fishy_scraper, parse_fishy_html, [JsonInput], 30000) of
-                                {ok, JsonResults} ->
-                                    % Decode JSON to Erlang terms (with binary keys)
-                                    {ok, ParsedResults} = thoas:decode(JsonResults),
+                                {ok, ParsedResults} ->
                                     logger:info("Fishy scraper: Parsed ~p results for ~p", [length(ParsedResults), LeagueCode]),
                                     process_results(LeagueCode, ParsedResults, Teams);
                                 {error, timeout} ->
@@ -66,10 +65,10 @@ process_results(LeagueCode, Results, Teams) ->
         <<"teams_data">> => #{LeagueCode => Teams}
     },
 
-    % Batch match all event names at once - send/receive JSON via ErlCracker
+    % Batch match all event names at once via ErlCracker
+    % ErlCracker automatically decodes JSON response
     case erlcracker:call(matcher_pool, name_matcher, match_matchups_batch, [RequestData], 30000) of
-        {ok, JsonResponse} ->
-            {ok, MatchResult} = thoas:decode(JsonResponse),
+        {ok, MatchResult} ->
             Matched = maps:get(<<"matched">>, MatchResult, #{}),
             Unmatched = maps:get(<<"unmatched">>, MatchResult, []),
 
